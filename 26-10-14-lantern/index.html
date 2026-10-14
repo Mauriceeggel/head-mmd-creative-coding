@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lantern</title>
+<meta name="description" content="A dark page you light up with your voice: a square scope reveals the text and images under it, as long as you make noise.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/*
+  Layers, bottom to top:
+  1. #doc     the article, drawn in phosphor green with a glow
+  2. #dark    a canvas of black that covers the page; it is cleared where the scope has shone
+  3. #scope   the square that follows the pointer
+  4. #hud, #intro
+*/
+:root{
+  --bg:#000;
+  --phos:#4dff88;
+  --phos-dim:#2fbf62;
+  --phos-faint:#14532b;
+  --glow:rgba(77,255,136,.55);
+  --glow-soft:rgba(77,255,136,.22);
+  --font-text:"IBM Plex Serif", Georgia, serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg); color:var(--phos); font-family:var(--font-text); line-height:1.6; overflow-x:hidden}
+html.live, html.live *{cursor:none}
+
+/* 1. The article */
+#doc{max-width:900px; margin:0 auto; padding:64px clamp(16px,4vw,40px) 160px; font-size:1.05rem;
+  text-shadow:0 0 3px var(--glow), 0 0 14px var(--glow-soft)}
+#doc header{border-bottom:1px solid var(--phos-dim); margin-bottom:24px; padding-bottom:8px}
+#doc h1{font-weight:400; font-size:clamp(2.2rem,6vw,3rem); line-height:1.1; margin:0}
+.from{font-family:var(--font-mono); font-size:.8rem; color:var(--phos-dim); margin:6px 0 0}
+#doc h2{font-weight:400; font-size:1.7rem; border-bottom:1px solid var(--phos-faint); margin:2.2em 0 .5em; padding-bottom:4px; clear:both}
+#doc h3{font-weight:600; font-size:1.2rem; margin:1.6em 0 .4em}
+#doc h4{font-weight:600; font-size:1.05rem; margin:1.4em 0 .3em}
+#doc p{margin:0 0 1em}
+#doc a{color:var(--phos); text-decoration:underline; text-decoration-color:var(--phos-faint); text-underline-offset:3px}
+#doc a:hover{text-decoration-color:var(--phos)}
+#doc ul,#doc ol{padding-left:1.4em; margin:0 0 1em}
+#doc figure{float:right; clear:right; margin:4px 0 16px 24px; padding:6px; border:1px solid var(--phos-faint); max-width:min(320px,45%)}
+#doc figure img{display:block; max-width:100%; height:auto;
+  filter:url(#phosphor) drop-shadow(0 0 6px var(--glow-soft))}
+/* Diagrams are black lines on transparent: invert them so the lines glow */
+#doc figure img[src*=".svg."]{filter:invert(1) url(#phosphor) drop-shadow(0 0 6px var(--glow-soft))}
+#doc figcaption{font-size:.82rem; line-height:1.4; color:var(--phos-dim); margin-top:6px}
+#doc footer{clear:both; margin-top:64px; padding-top:12px; border-top:1px solid var(--phos-faint); font-family:var(--font-mono); font-size:.78rem; color:var(--phos-dim)}
+@media (max-width:640px){
+  #doc figure{float:none; margin:0 0 16px; max-width:100%}
+}
+
+/* 2. The darkness */
+#dark{position:fixed; left:0; top:0; z-index:10; pointer-events:none; will-change:transform}
+
+/* 3. The scope */
+#scope{--lvl:0; --size:180px; position:fixed; left:0; top:0; z-index:20; width:var(--size); height:var(--size);
+  margin:calc(var(--size) / -2) 0 0 calc(var(--size) / -2); pointer-events:none; display:none; will-change:transform;
+  border:1.5px solid rgba(77,255,136,calc(.35 + .65 * var(--lvl)));
+  box-shadow:0 0 calc(6px + 34px * var(--lvl)) rgba(77,255,136,calc(.15 + .55 * var(--lvl))),
+             inset 0 0 calc(4px + 24px * var(--lvl)) rgba(77,255,136,calc(.08 + .3 * var(--lvl)))}
+html.live #scope.on{display:block}
+/* corner ticks and centre cross */
+#scope::before{content:""; position:absolute; inset:-6px;
+  background:
+    linear-gradient(var(--phos),var(--phos)) left top/14px 2px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) left top/2px 14px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) right top/14px 2px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) right top/2px 14px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) left bottom/14px 2px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) left bottom/2px 14px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) right bottom/14px 2px no-repeat,
+    linear-gradient(var(--phos),var(--phos)) right bottom/2px 14px no-repeat;
+  opacity:calc(.5 + .5 * var(--lvl))}
+#scope::after{content:""; position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px;
+  background:linear-gradient(var(--phos),var(--phos)) center/16px 1px no-repeat, linear-gradient(var(--phos),var(--phos)) center/1px 16px no-repeat;
+  opacity:.6}
+.sweep{position:absolute; inset:0; overflow:hidden; opacity:calc(.15 + .6 * var(--lvl))}
+.sweep::before{content:""; position:absolute; left:50%; top:50%; width:150%; height:150%; translate:-50% -50%;
+  background:conic-gradient(from 0deg, rgba(77,255,136,.45), rgba(77,255,136,0) 70deg, transparent 360deg);
+  animation:spin 2.4s linear infinite; mix-blend-mode:screen}
+@keyframes spin{to{rotate:360deg}}
+.readout{position:absolute; left:-1.5px; bottom:calc(100% + 8px); font-family:var(--font-mono); font-size:11px; letter-spacing:.08em;
+  color:var(--phos); text-shadow:0 0 6px var(--glow); white-space:nowrap; display:flex; gap:8px; align-items:center}
+.meter{display:inline-block; width:64px; height:6px; border:1px solid var(--phos-dim); position:relative}
+.meter i{position:absolute; inset:0; transform-origin:left; transform:scaleX(var(--lvl)); background:var(--phos); box-shadow:0 0 6px var(--glow)}
+
+/* 4. HUD and intro */
+#hud{position:fixed; left:16px; bottom:14px; z-index:30; font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; color:var(--phos-dim);
+  display:flex; gap:14px; align-items:center; text-shadow:0 0 6px var(--glow-soft)}
+#hud a{color:inherit; text-decoration:none; border-bottom:1px solid var(--phos-faint); pointer-events:auto}
+html.live #hud a{cursor:none}
+
+#intro{position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; background:transparent}
+#intro[hidden]{display:none}
+.card{max-width:440px; border:1.5px solid var(--phos); padding:28px 28px 24px; background:#000;
+  box-shadow:0 0 30px var(--glow-soft), inset 0 0 20px rgba(77,255,136,.08); font-family:var(--font-mono); font-size:.9rem; line-height:1.55}
+.card h2{font-family:var(--font-mono); font-weight:600; font-size:1.6rem; letter-spacing:.14em; text-transform:uppercase; margin:0 0 14px; text-shadow:0 0 10px var(--glow)}
+.card p{margin:0 0 12px; color:var(--phos)}
+.card .small{font-size:.78rem; color:var(--phos-dim)}
+.card .small a{color:inherit}
+.card .err{color:#ffb35c; text-shadow:none}
+.actions{display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 14px}
+.card button{font:inherit; font-weight:600; letter-spacing:.06em; color:#000; background:var(--phos); border:0; padding:10px 16px; cursor:pointer;
+  box-shadow:0 0 16px var(--glow)}
+.card button.ghost{background:transparent; color:var(--phos); border:1px solid var(--phos-dim); box-shadow:none}
+.card button:focus-visible{outline:2px solid var(--phos); outline-offset:3px}
+
+@media (prefers-reduced-motion: reduce){ .sweep::before{animation:none} }
+</style>
+</head>
+<body>
+
+<!-- Maps an image's brightness onto phosphor green, keeping its transparency -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="phosphor" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="
+      .064 .215 .022 0 0
+      .213 .715 .072 0 0
+      .113 .379 .038 0 0
+      0    0    0    1 0"/>
+  </filter>
+</svg>
+
+<article id="doc">
+  <header>
+    <h1>Radar</h1>
+    <p class="from">From Wikipedia, the free encyclopedia · excerpt</p>
+  </header>
+<figure><a href="https://en.wikipedia.org/wiki/File:Radar_antenna.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/9/90/Radar_antenna.jpg/250px-Radar_antenna.jpg" alt="A long-range radar antenna, known as ALTAIR, used to detect and track space objects in conjunction with ABM testing at the Ronald Reagan Test Site on Kwajalein Atoll." loading="lazy" decoding="async" width="154" height="197"></a><figcaption>Long-range radar <a href="https://en.wikipedia.org/wiki/Antenna_(electronics)" target="_blank" rel="noopener">antenna</a>, used to track space objects and ballistic missiles.</figcaption></figure>
+<figure><a href="https://en.wikipedia.org/wiki/File:Radar-hatzerim-1-1.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/6/66/Radar-hatzerim-1-1.jpg/250px-Radar-hatzerim-1-1.jpg" alt="Israeli military radar is typical of the type of radar used for air traffic control. The antenna rotates at a steady rate, sweeping the local airspace with a narrow vertical fan-shaped beam, to detect aircraft at all altitudes." loading="lazy" decoding="async" width="180" height="196"></a><figcaption>Radar of the type used for detection of aircraft. It rotates steadily, sweeping the airspace with a narrow beam.</figcaption></figure>
+<p><b>Radar</b> is a system that uses <a href="https://en.wikipedia.org/wiki/Radio_wave" target="_blank" rel="noopener">radio waves</a> to determine the distance (<i><a href="https://en.wikipedia.org/wiki/Ranging" target="_blank" rel="noopener">ranging</a></i>), <a href="https://en.wikipedia.org/wiki/Direction_(geometry)" target="_blank" rel="noopener">direction</a> (<a href="https://en.wikipedia.org/wiki/Azimuth" target="_blank" rel="noopener">azimuth</a> and <a href="https://en.wikipedia.org/wiki/Elevation_angle" target="_blank" rel="noopener">elevation angles</a>), and <a href="https://en.wikipedia.org/wiki/Radial_velocity" target="_blank" rel="noopener">radial velocity</a> of objects relative to the site. It is a <a href="https://en.wikipedia.org/wiki/Radiodetermination" target="_blank" rel="noopener">radiodetermination</a> method used to detect and track <a href="https://en.wikipedia.org/wiki/Aircraft" target="_blank" rel="noopener">aircraft</a>, <a href="https://en.wikipedia.org/wiki/Marine_radar" target="_blank" rel="noopener">ships</a>, <a href="https://en.wikipedia.org/wiki/Spacecraft" target="_blank" rel="noopener">spacecraft</a>, <a href="https://en.wikipedia.org/wiki/Guided_missiles" target="_blank" rel="noopener">guided missiles</a>, <a href="https://en.wikipedia.org/wiki/Motor_vehicle" target="_blank" rel="noopener">motor vehicles</a>, <a href="https://en.wikipedia.org/wiki/Weather_radar" target="_blank" rel="noopener">weather formations</a> and <a href="https://en.wikipedia.org/wiki/Terrain-following_radar" target="_blank" rel="noopener">terrain</a>. The term <i>RADAR</i> was coined in 1940 by the <a href="https://en.wikipedia.org/wiki/United_States_Navy" target="_blank" rel="noopener">United States Navy</a> as an <a href="https://en.wikipedia.org/wiki/Acronym_and_initialism" target="_blank" rel="noopener">acronym</a> for "radio detection and ranging". The term <i>radar</i> has since entered English and other languages as an <a href="https://en.wiktionary.org/wiki/anacronym" target="_blank" rel="noopener">anacronym</a>, a common noun, <a href="https://en.wikipedia.org/wiki/Acronym#All-caps_style" target="_blank" rel="noopener">losing all capitalization</a>.</p>
+<p>A radar system consists of a <a href="https://en.wikipedia.org/wiki/Transmitter" target="_blank" rel="noopener">transmitter</a> producing <a href="https://en.wikipedia.org/wiki/Electromagnetic_wave" target="_blank" rel="noopener">electromagnetic waves</a> in the <a href="https://en.wikipedia.org/wiki/Radio_spectrum" target="_blank" rel="noopener">radio</a> or <a href="https://en.wikipedia.org/wiki/Microwave" target="_blank" rel="noopener">microwave</a> domain, a transmitting <a href="https://en.wikipedia.org/wiki/Antenna_(radio)" target="_blank" rel="noopener">antenna</a>, a receiving antenna (often the same antenna is used for transmitting and receiving) and a <a href="https://en.wikipedia.org/wiki/Radio_receiver" target="_blank" rel="noopener">receiver</a> and <a href="https://en.wikipedia.org/wiki/Data_processing_system" target="_blank" rel="noopener">processor</a> to determine properties of the objects. Radio waves (pulsed or continuous) from the transmitter reflect off the objects and return to the receiver, giving information about the objects' locations and speeds. This device was developed secretly for <a href="https://en.wikipedia.org/wiki/Military" target="_blank" rel="noopener">military</a> use by several countries in the period before and during <a href="https://en.wikipedia.org/wiki/World_War_II" target="_blank" rel="noopener">World War II</a>. A key development was the <a href="https://en.wikipedia.org/wiki/Cavity_magnetron" target="_blank" rel="noopener">cavity magnetron</a> in the <a href="https://en.wikipedia.org/wiki/United_Kingdom" target="_blank" rel="noopener">United Kingdom</a>, which allowed the creation of relatively small systems with sub-meter resolution.</p>
+<p>The modern uses of radar are highly diverse, including air and terrestrial traffic control, <a href="https://en.wikipedia.org/wiki/Radar_astronomy" target="_blank" rel="noopener">radar astronomy</a>, <a href="https://en.wikipedia.org/wiki/Antiaircraft_warfare" target="_blank" rel="noopener">air-defense systems</a>, <a href="https://en.wikipedia.org/wiki/Close-in_weapon_system" target="_blank" rel="noopener">anti-missile systems</a>, <a href="https://en.wikipedia.org/wiki/Marine_radar" target="_blank" rel="noopener">marine radars</a> to locate landmarks and other ships, aircraft anti-collision systems, <a href="https://en.wikipedia.org/wiki/Research_vessel" target="_blank" rel="noopener">ocean surveillance</a> systems, outer <a href="https://en.wikipedia.org/wiki/Space_surveillance" target="_blank" rel="noopener">space surveillance</a> and <a href="https://en.wikipedia.org/wiki/Space_rendezvous" target="_blank" rel="noopener">rendezvous</a> systems, <a href="https://en.wikipedia.org/wiki/Meteorology" target="_blank" rel="noopener">meteorological</a> <a href="https://en.wikipedia.org/wiki/Precipitation" target="_blank" rel="noopener">precipitation</a> monitoring, <a href="https://en.wikipedia.org/wiki/Radar_remote_sensing" target="_blank" rel="noopener">radar remote sensing</a>, altimetry and <a href="https://en.wikipedia.org/wiki/Flight_control_system" target="_blank" rel="noopener">flight control systems</a>, <a href="https://en.wikipedia.org/wiki/Precision-guided_munition" target="_blank" rel="noopener">guided missile</a> target locating systems, <a href="https://en.wikipedia.org/wiki/Self-driving_car" target="_blank" rel="noopener">self-driving cars</a>, and <a href="https://en.wikipedia.org/wiki/Ground-penetrating_radar" target="_blank" rel="noopener">ground-penetrating radar</a> for geological observations. Modern high tech radar systems use <a href="https://en.wikipedia.org/wiki/Digital_signal_processing" target="_blank" rel="noopener">digital signal processing</a> and <a href="https://en.wikipedia.org/wiki/Machine_learning" target="_blank" rel="noopener">machine learning</a> and are capable of extracting useful information from very high <a href="https://en.wikipedia.org/wiki/Noise_(electronics)" target="_blank" rel="noopener">noise</a> levels.</p>
+<p>Other systems which are similar to radar make use of other regions of the <a href="https://en.wikipedia.org/wiki/Electromagnetic_spectrum" target="_blank" rel="noopener">electromagnetic spectrum</a>. One example is <a href="https://en.wikipedia.org/wiki/Lidar" target="_blank" rel="noopener">lidar</a>, which uses predominantly <a href="https://en.wikipedia.org/wiki/Infrared_light" target="_blank" rel="noopener">infrared light</a> from <a href="https://en.wikipedia.org/wiki/Laser" target="_blank" rel="noopener">lasers</a> rather than radio waves. With the emergence of driverless vehicles, radar is expected to assist the automated platform to monitor its environment, thus preventing unwanted incidents.</p>
+<h2>History</h2>
+<h3>First experiments</h3>
+<p>As early as 1886, German physicist <a href="https://en.wikipedia.org/wiki/Heinrich_Hertz" target="_blank" rel="noopener">Heinrich Hertz</a> showed that radio waves could be reflected from solid objects. In 1895, <a href="https://en.wikipedia.org/wiki/Alexander_Stepanovich_Popov" target="_blank" rel="noopener">Alexander Popov</a>, a physics instructor at the <a href="https://en.wikipedia.org/wiki/Imperial_Russian_Navy" target="_blank" rel="noopener">Imperial Russian Navy</a> school in <a href="https://en.wikipedia.org/wiki/Kronstadt" target="_blank" rel="noopener">Kronstadt</a>, developed an apparatus using a <a href="https://en.wikipedia.org/wiki/Coherer" target="_blank" rel="noopener">coherer</a> tube for detecting distant lightning strikes. The next year, he added a <a href="https://en.wikipedia.org/wiki/Spark-gap_transmitter" target="_blank" rel="noopener">spark-gap transmitter</a>. In 1897, while testing this equipment for communicating between two ships in the <a href="https://en.wikipedia.org/wiki/Baltic_Sea" target="_blank" rel="noopener">Baltic Sea</a>, he took note of an <a href="https://en.wikipedia.org/wiki/Interference_beat" target="_blank" rel="noopener">interference beat</a> caused by the passage of a third vessel. In his report, Popov wrote that this phenomenon might be used for detecting objects, but he did nothing more with this observation.</p>
+<p>The German inventor <a href="https://en.wikipedia.org/wiki/Christian_Hülsmeyer" target="_blank" rel="noopener">Christian Hülsmeyer</a> was the first to use radio waves to detect "the presence of distant metallic objects". In 1904, he demonstrated the feasibility of detecting a ship in dense fog, but not its distance from the transmitter. He obtained a patent for his detection device in April 1904 and later a patent for a related amendment for estimating the distance to the ship. He also obtained a British patent on 23 September 1904 for a full radar system, that he called a <i>telemobiloscope</i>. It operated on a 50 cm wavelength and the pulsed radar signal was created via a spark-gap. His system already used the classic antenna setup of horn antenna with parabolic reflector and was presented to German military officials in practical tests in <a href="https://en.wikipedia.org/wiki/Cologne" target="_blank" rel="noopener">Cologne</a> and <a href="https://en.wikipedia.org/wiki/Rotterdam" target="_blank" rel="noopener">Rotterdam</a> harbour but was rejected.</p>
+<p>In 1915, <a href="https://en.wikipedia.org/wiki/Robert_Watson-Watt" target="_blank" rel="noopener">Robert Watson-Watt</a> used radio technology to provide advance warning of thunderstorms to airmen and during the 1920s went on to lead the U.K. research establishment to make many advances using radio techniques, including the probing of the <a href="https://en.wikipedia.org/wiki/Ionosphere" target="_blank" rel="noopener">ionosphere</a> and the detection of <a href="https://en.wikipedia.org/wiki/Lightning" target="_blank" rel="noopener">lightning</a> at long distances. Through his lightning experiments, Watson-Watt became an expert on the use of <a href="https://en.wikipedia.org/wiki/Radio_direction_finding" target="_blank" rel="noopener">radio direction finding</a> before turning his inquiry to <a href="https://en.wikipedia.org/wiki/Shortwave" target="_blank" rel="noopener">shortwave</a> transmission. Requiring a suitable receiver for such studies, he told the "new boy" <a href="https://en.wikipedia.org/wiki/Arnold_Frederic_Wilkins" target="_blank" rel="noopener">Arnold Frederic Wilkins</a> to conduct an extensive review of available shortwave units. Wilkins would select a <a href="https://en.wikipedia.org/wiki/General_Post_Office" target="_blank" rel="noopener">General Post Office</a> model after noting its manual's description of a "fading" effect (the common term for interference at the time) when aircraft flew overhead.</p>
+<p>By placing a transmitter and receiver on opposite sides of the <a href="https://en.wikipedia.org/wiki/Potomac_River" target="_blank" rel="noopener">Potomac River</a> in 1922, U.S. Navy researchers <a href="https://en.wikipedia.org/wiki/A._Hoyt_Taylor" target="_blank" rel="noopener">A. Hoyt Taylor</a> and <a href="https://en.wikipedia.org/wiki/Leo_C._Young" target="_blank" rel="noopener">Leo C. Young</a> discovered that ships passing through the beam path caused the received signal to fade in and out. Taylor submitted a report, suggesting that this phenomenon might be used to detect the presence of ships in low visibility, but the Navy did not immediately continue the work. Eight years later, <a href="https://en.wikipedia.org/wiki/Lawrence_A._Hyland" target="_blank" rel="noopener">Lawrence A. Hyland</a> at the <a href="https://en.wikipedia.org/wiki/Naval_Research_Laboratory" target="_blank" rel="noopener">Naval Research Laboratory</a> (NRL) observed similar fading effects from passing aircraft; this revelation led to a patent application as well as a proposal for further intensive research on radio-echo signals from moving targets to take place at NRL, where Taylor and Young were based at the time.</p>
+<p>Similarly, in the UK, L. S. Alder took out a secret provisional patent for Naval radar in 1928. <a href="https://en.wikipedia.org/wiki/W._A._S._Butement" target="_blank" rel="noopener">W.A.S. Butement</a> and P. E. Pollard developed a <a href="https://en.wikipedia.org/wiki/Breadboard" target="_blank" rel="noopener">breadboard</a> test unit, operating at 50 cm (600 MHz) and using pulsed modulation which gave successful laboratory results. In January 1931, a writeup on the apparatus was entered in the <i>Inventions Book</i> maintained by the Royal Engineers. This is the first official record in Great Britain of the technology that was used in coastal defence and was incorporated into <a href="https://en.wikipedia.org/wiki/Chain_Home" target="_blank" rel="noopener">Chain Home</a> as <a href="https://en.wikipedia.org/wiki/Chain_Home_Low" target="_blank" rel="noopener">Chain Home (low)</a>.</p>
+<h3>Before World War II</h3>
+<figure><a href="https://en.wikipedia.org/wiki/File:Early_radar_antenna_-_US_Naval_Research_Laboratory_Anacostia.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5e/Early_radar_antenna_-_US_Naval_Research_Laboratory_Anacostia.jpg/250px-Early_radar_antenna_-_US_Naval_Research_Laboratory_Anacostia.jpg" alt="" loading="lazy" decoding="async" width="200" height="259"></a><figcaption>Experimental radar antenna, US <a href="https://en.wikipedia.org/wiki/Naval_Research_Laboratory" target="_blank" rel="noopener">Naval Research Laboratory</a>, Anacostia, D. C., from the late 1930s (photo taken in 1945)</figcaption></figure>
+<p>Before <a href="https://en.wikipedia.org/wiki/World_War_II" target="_blank" rel="noopener">World War II</a>, radar research  was conducted in the United Kingdom, the United States, <a href="https://en.wikipedia.org/wiki/French_Third_Republic" target="_blank" rel="noopener">France</a>, <a href="https://en.wikipedia.org/wiki/Nazi_Germany" target="_blank" rel="noopener">Germany</a>, <a href="https://en.wikipedia.org/wiki/Kingdom_of_Italy" target="_blank" rel="noopener">Italy</a>, <a href="https://en.wikipedia.org/wiki/Empire_of_Japan" target="_blank" rel="noopener">Japan</a>, the <a href="https://en.wikipedia.org/wiki/Soviet_Union" target="_blank" rel="noopener">Soviet Union</a>, and the <a href="https://en.wikipedia.org/wiki/Netherlands" target="_blank" rel="noopener">Netherlands</a>.</p>
+<p>In France in 1934, following systematic studies on the <a href="https://en.wikipedia.org/wiki/Cavity_Magnetron#Split-anode_magnetron" target="_blank" rel="noopener">split-anode magnetron</a>, the research branch of the <a href="https://en.wikipedia.org/wiki/Compagnie_générale_de_la_télégraphie_sans_fil" target="_blank" rel="noopener">Compagnie générale de la télégraphie sans fil</a> (CSF) headed by Maurice Ponte with Henri Gutton, Sylvain Berline and M. Hugon, began developing an obstacle-locating radio apparatus, aspects of which were installed on the ocean liner <a href="https://en.wikipedia.org/wiki/SS_Normandie" target="_blank" rel="noopener"><i>Normandie</i></a> in 1935.</p>
+<p>During the same period, Soviet military engineer <a href="https://en.wikipedia.org/wiki/Pavel_K._Oshchepkov" target="_blank" rel="noopener">P.K. Oshchepkov</a>, in collaboration with the <a href="https://en.wikipedia.org/wiki/Saint_Petersburg_State_Electrotechnical_University" target="_blank" rel="noopener">Leningrad Electrotechnical Institute</a>, produced an experimental apparatus, RAPID, capable of detecting an aircraft within 3 km of a receiver. The Soviets produced their first mass production radars RUS-1 and RUS-2 Redut in 1939 but further development was slowed following the arrest of Oshchepkov and his subsequent <a href="https://en.wikipedia.org/wiki/Gulag" target="_blank" rel="noopener">gulag</a> sentence. In total, only 607 Redut stations were produced during the war. The first Russian airborne radar, <a href="https://en.wikipedia.org/wiki/Gneiss-2" target="_blank" rel="noopener">Gneiss-2</a>, entered into service in June 1943 on <a href="https://en.wikipedia.org/wiki/Petlyakov_Pe-2" target="_blank" rel="noopener">Pe-2</a> dive bombers. More than 230 Gneiss-2 stations were produced by the end of 1944. The French and Soviet systems, however, featured continuous-wave operation that did not provide the full performance ultimately synonymous with modern radar systems.</p>
+<p>Full radar evolved as a pulsed system, and the first such elementary apparatus was demonstrated in December 1934 by the American <a href="https://en.wikipedia.org/wiki/Robert_Morris_Page" target="_blank" rel="noopener">Robert M. Page</a>, working at the <a href="https://en.wikipedia.org/wiki/Naval_Research_Laboratory" target="_blank" rel="noopener">Naval Research Laboratory</a>. The following year, the <a href="https://en.wikipedia.org/wiki/United_States_Army" target="_blank" rel="noopener">United States Army</a> successfully tested a primitive surface-to-surface radar to aim <a href="https://en.wikipedia.org/wiki/Coastal_artillery" target="_blank" rel="noopener">coastal battery</a> <a href="https://en.wikipedia.org/wiki/Searchlight" target="_blank" rel="noopener">searchlights</a> at night. This design was followed by a pulsed system demonstrated in May 1935 by <a href="https://en.wikipedia.org/wiki/Rudolf_Kühnhold" target="_blank" rel="noopener">Rudolf Kühnhold</a> and the firm GEMA in Germany and then another in June 1935 by an <a href="https://en.wikipedia.org/wiki/Air_Ministry" target="_blank" rel="noopener">Air Ministry</a> team led by <a href="https://en.wikipedia.org/wiki/Robert_Watson-Watt" target="_blank" rel="noopener">Robert Watson-Watt</a> in Great Britain.</p>
+<figure><a href="https://en.wikipedia.org/wiki/File:Watson_Radar.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Watson_Radar.jpg/250px-Watson_Radar.jpg" alt="" loading="lazy" decoding="async" width="250" height="188"></a><figcaption>The first workable unit built by <a href="https://en.wikipedia.org/wiki/Robert_Watson-Watt" target="_blank" rel="noopener">Robert Watson-Watt</a> and his team</figcaption></figure>
+<p>In 1935, Watson-Watt was asked to judge recent reports of a German radio-based <a href="https://en.wikipedia.org/wiki/Death_ray" target="_blank" rel="noopener">death ray</a> and turned the request over to Wilkins. Wilkins returned a set of calculations demonstrating the system was basically impossible. When Watson-Watt then asked what such a system might do, Wilkins recalled the earlier report about aircraft causing radio interference. This revelation led to the <a href="https://en.wikipedia.org/wiki/Daventry_Experiment" target="_blank" rel="noopener">Daventry Experiment</a> of 26 February 1935, using a powerful <a href="https://en.wikipedia.org/wiki/BBC" target="_blank" rel="noopener">BBC</a> shortwave transmitter as the source and their GPO receiver setup in a field while a bomber flew around the site. When the plane was clearly detected, <a href="https://en.wikipedia.org/wiki/Hugh_Dowding" target="_blank" rel="noopener">Hugh Dowding</a>, the <a href="https://en.wikipedia.org/wiki/Air_Member_for_Supply_and_Research" target="_blank" rel="noopener">Air Member for Supply and Research</a>, was very impressed with their system's potential and funds were immediately provided for further operational development. Watson-Watt's team patented the device in patent GB593017.</p>
+<figure><a href="https://en.wikipedia.org/wiki/File:Chain_home.jpg" target="_blank" rel="noopener"><img src="https://upload.wikimedia.org/wikipedia/commons/9/93/Chain_home.jpg" alt="" loading="lazy" decoding="async" width="160" height="296"></a><figcaption>A <a href="https://en.wikipedia.org/wiki/Chain_Home" target="_blank" rel="noopener">Chain Home</a> tower in Great Baddow, Essex, United Kingdom</figcaption></figure>
+<figure><a href="https://en.wikipedia.org/wiki/File:Watson_watt_02_fr.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b3/Watson_watt_02_fr.jpg/250px-Watson_watt_02_fr.jpg" alt="" loading="lazy" decoding="async" width="250" height="188"></a><figcaption>Memorial plaque commemorating Robert Watson-Watt and <a href="https://en.wikipedia.org/wiki/Arnold_Wilkins" target="_blank" rel="noopener">Arnold Wilkins</a></figcaption></figure>
+<p>Development of radar greatly expanded in 1936, when Watson-Watt became superintendent of a new establishment under the British <a href="https://en.wikipedia.org/wiki/Air_Ministry" target="_blank" rel="noopener">Air Ministry</a>, Bawdsey Research Station located in <a href="https://en.wikipedia.org/wiki/Bawdsey_Manor" target="_blank" rel="noopener">Bawdsey Manor</a>, near Felixstowe, Suffolk. Work there resulted in the design and installation of aircraft detection and tracking stations called "<a href="https://en.wikipedia.org/wiki/Chain_Home" target="_blank" rel="noopener">Chain Home</a>" along the East and South coasts of England in time for the outbreak of World War II in 1939. This system provided the vital advance information that helped the Royal Air Force win the <a href="https://en.wikipedia.org/wiki/Battle_of_Britain" target="_blank" rel="noopener">Battle of Britain</a>; without it, significant numbers of fighter aircraft, which Great Britain did not have available, would always have needed to be in the air to respond quickly. The radar formed part of the "<a href="https://en.wikipedia.org/wiki/Dowding_system" target="_blank" rel="noopener">Dowding system</a>" for collecting reports of enemy aircraft and coordinating the response.</p>
+<p>Given all required funding and development support, the team produced working radar systems in 1935 and began deployment. By 1936, the first five Chain Home (CH) systems were operational and by 1940 stretched across the entire UK including Northern Ireland. Even by standards of the era, CH was crude; instead of broadcasting and receiving from an aimed antenna, CH broadcast a signal floodlighting the entire area in front of it, and then used one of Watson-Watt's own radio direction finders to determine the direction of the returned echoes. This fact meant CH transmitters had to be much more powerful and have better antennas than competing systems but allowed its rapid introduction using existing technologies.</p>
+<h3>During World War II</h3>
+<figure><a href="https://en.wikipedia.org/wiki/File:East_Coast_Chain_Home_radar_station_CH15176.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/0/03/East_Coast_Chain_Home_radar_station_CH15176.jpg/250px-East_Coast_Chain_Home_radar_station_CH15176.jpg" alt="" loading="lazy" decoding="async" width="250" height="185"></a><figcaption>East Coast <a href="https://en.wikipedia.org/wiki/Chain_Home" target="_blank" rel="noopener">Chain Home</a> radar operators in England</figcaption></figure>
+<p>A key development was the <a href="https://en.wikipedia.org/wiki/Cavity_magnetron" target="_blank" rel="noopener">cavity magnetron</a> in the UK, which allowed the creation of relatively small systems with sub-meter resolution. Britain shared the technology with the U.S. during the 1940 <a href="https://en.wikipedia.org/wiki/Tizard_Mission" target="_blank" rel="noopener">Tizard Mission</a>.</p>
+<p>In April 1940, <i><a href="https://en.wikipedia.org/wiki/Popular_Science" target="_blank" rel="noopener">Popular Science</a></i> showed an example of a radar unit using the Watson-Watt patent in an article on air defence. Also, in late 1941 <i><a href="https://en.wikipedia.org/wiki/Popular_Mechanics" target="_blank" rel="noopener">Popular Mechanics</a></i> had an article in which a U.S. scientist speculated about the British early warning system on the English east coast and came close to what it was and how it worked.</p> Watson-Watt was sent to the U.S. in 1941 to advise on air defense after Japan's <a href="https://en.wikipedia.org/wiki/Attack_on_Pearl_Harbor" target="_blank" rel="noopener">attack on Pearl Harbor</a>. <a href="https://en.wikipedia.org/wiki/Alfred_Lee_Loomis" target="_blank" rel="noopener">Alfred Lee Loomis</a> organized the secret <a href="https://en.wikipedia.org/wiki/MIT_Radiation_Laboratory" target="_blank" rel="noopener">MIT Radiation Laboratory</a> at <a href="https://en.wikipedia.org/wiki/Massachusetts_Institute_of_Technology" target="_blank" rel="noopener">Massachusetts Institute of Technology</a>, Cambridge, Massachusetts which developed microwave radar technology in the years 1941–45. Later, in 1943, Page greatly improved radar with the <a href="https://en.wikipedia.org/wiki/Monopulse_radar" target="_blank" rel="noopener">monopulse technique</a> that was used for many years in most radar applications.
+<p>The war precipitated research to find better resolution, more portability, and more features for radar, including small, lightweight sets to equip <a href="https://en.wikipedia.org/wiki/Night_fighter" target="_blank" rel="noopener">night fighters</a> (<a href="https://en.wikipedia.org/wiki/Aircraft_interception_radar" target="_blank" rel="noopener">aircraft interception radar</a>) and <a href="https://en.wikipedia.org/wiki/Maritime_patrol_aircraft" target="_blank" rel="noopener">maritime patrol aircraft</a> (<a href="https://en.wikipedia.org/wiki/Air-to-surface-vessel_radar" target="_blank" rel="noopener">air-to-surface-vessel radar</a>), and complementary navigation systems like <a href="https://en.wikipedia.org/wiki/Oboe_(navigation)" target="_blank" rel="noopener">Oboe</a> used by the <a href="https://en.wikipedia.org/wiki/Pathfinder_(RAF)" target="_blank" rel="noopener">RAF's Pathfinder</a>.</p>
+<h2>Applications</h2>
+<figure><a href="https://en.wikipedia.org/wiki/File:Rotating_marine_radar_-_rotating_waveguide_antenna.gif" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/5/51/Rotating_marine_radar_-_rotating_waveguide_antenna.gif/250px-Rotating_marine_radar_-_rotating_waveguide_antenna.gif" alt="" loading="lazy" decoding="async" width="250" height="141"></a><figcaption>Commercial marine radar antenna. The rotating antenna radiates a vertical fan-shaped beam.</figcaption></figure>
+<p>The information provided by radar includes the bearing and range (and therefore position) of the object from the radar scanner. It is thus used in many different fields where the need for such positioning is crucial. The first use of radar was for military purposes: to locate air, ground and sea targets. This evolved in the civilian field into applications for aircraft, ships, and automobiles.</p>
+<p>In <a href="https://en.wikipedia.org/wiki/Aviation" target="_blank" rel="noopener">aviation</a>, aircraft can be equipped with radar devices that warn of aircraft or other obstacles in or approaching their path, display weather information, and give accurate altitude readings. The first commercial device fitted to aircraft was a 1938 Bell Lab unit on some <a href="https://en.wikipedia.org/wiki/United_Air_Lines" target="_blank" rel="noopener">United Air Lines</a> aircraft. Aircraft can land in fog at airports equipped with radar-assisted <a href="https://en.wikipedia.org/wiki/Ground-controlled_approach" target="_blank" rel="noopener">ground-controlled approach</a> systems in which the plane's position is observed on <a href="https://en.wikipedia.org/wiki/Precision_approach_radar" target="_blank" rel="noopener">precision approach radar</a> screens by operators who thereby give radio landing instructions to the pilot, maintaining the aircraft on a defined approach path to the runway. Military fighter aircraft are usually fitted with air-to-air targeting radars, to detect and target enemy aircraft. In addition, larger specialized military aircraft carry powerful airborne radars to observe air traffic over a wide region and direct fighter aircraft towards targets.</p>
+<p><a href="https://en.wikipedia.org/wiki/Marine_radar" target="_blank" rel="noopener">Marine radars</a> are used to measure the bearing and distance of ships to prevent collision with other ships, to navigate, and to fix their position at sea when within range of shore or other fixed references such as islands, buoys, and lightships. In port or in harbour, <a href="https://en.wikipedia.org/wiki/Vessel_traffic_service" target="_blank" rel="noopener">vessel traffic service</a> radar systems are used to monitor and regulate ship movements in busy waters.</p>
+<p>Meteorologists use radar to monitor <a href="https://en.wikipedia.org/wiki/Precipitation" target="_blank" rel="noopener">precipitation</a> and wind. It has become the primary tool for short-term <a href="https://en.wikipedia.org/wiki/Weather_forecast" target="_blank" rel="noopener">weather forecasting</a> and watching for <a href="https://en.wikipedia.org/wiki/Severe_weather" target="_blank" rel="noopener">severe weather</a> such as <a href="https://en.wikipedia.org/wiki/Thunderstorm" target="_blank" rel="noopener">thunderstorms</a>, <a href="https://en.wikipedia.org/wiki/Tornado" target="_blank" rel="noopener">tornadoes</a>, <a href="https://en.wikipedia.org/wiki/Winter_storm" target="_blank" rel="noopener">winter storms</a>, precipitation types, etc. <a href="https://en.wikipedia.org/wiki/Geologist" target="_blank" rel="noopener">Geologists</a> use specialized <a href="https://en.wikipedia.org/wiki/Ground-penetrating_radar" target="_blank" rel="noopener">ground-penetrating radars</a> to map the composition of <a href="https://en.wikipedia.org/wiki/Crust_(geology)" target="_blank" rel="noopener">Earth's crust</a>. Police forces use <a href="https://en.wikipedia.org/wiki/Radar_gun" target="_blank" rel="noopener">radar guns</a> to monitor vehicle speeds on the roads. Automotive radars are used for adaptive cruise control and emergency braking on vehicles by ignoring stationary roadside objects that could cause incorrect brake application and instead measuring moving objects to prevent collision with other vehicles. As part of <a href="https://en.wikipedia.org/wiki/Intelligent_Transport_Systems" target="_blank" rel="noopener">Intelligent Transport Systems</a>, fixed-position stopped vehicle detection (SVD) radars are mounted on the roadside to detect stranded vehicles, obstructions and debris by inverting the automotive radar approach and ignoring moving objects. Smaller radar systems are used to <a href="https://en.wikipedia.org/wiki/Motion_detector" target="_blank" rel="noopener">detect human movement</a>. Examples are breathing pattern detection for sleep monitoring and hand and finger <a href="https://en.wikipedia.org/wiki/Gesture_recognition" target="_blank" rel="noopener">gesture detection</a> for computer interaction. Automatic door opening, light activation and intruder sensing are also common.</p>
+<h2>Principles</h2>
+<h3>Radar signal</h3>
+<figure><a href="https://en.wikipedia.org/wiki/File:3D_Doppler_Radar_Spectrum_showing_a_Barker_Code_of_13.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/7/73/3D_Doppler_Radar_Spectrum_showing_a_Barker_Code_of_13.jpg/250px-3D_Doppler_Radar_Spectrum_showing_a_Barker_Code_of_13.jpg" alt="" loading="lazy" decoding="async" width="250" height="199"></a><figcaption>3D Doppler radar spectrum showing a <a href="https://en.wikipedia.org/wiki/Barker_code" target="_blank" rel="noopener">Barker code</a> of 13</figcaption></figure>
+<p>A radar system has a <a href="https://en.wikipedia.org/wiki/Transmitter" target="_blank" rel="noopener">transmitter</a> that emits <a href="https://en.wikipedia.org/wiki/Radio_wave" target="_blank" rel="noopener">radio waves</a> known as <i>radar signals</i> in predetermined directions. When these signals contact an object they are usually <a href="https://en.wikipedia.org/wiki/Reflection_(physics)" target="_blank" rel="noopener">reflected</a> or <a href="https://en.wikipedia.org/wiki/Scattering" target="_blank" rel="noopener">scattered</a> in many directions, although some of them will be absorbed and penetrate into the target. Radar signals are reflected especially well by materials of considerable <a href="https://en.wikipedia.org/wiki/Electrical_conductivity" target="_blank" rel="noopener">electrical conductivity</a>—such as most metals, <a href="https://en.wikipedia.org/wiki/Seawater" target="_blank" rel="noopener">seawater</a>, and wet ground. This makes the use of <a href="https://en.wikipedia.org/wiki/Radar_altimeter" target="_blank" rel="noopener">radar altimeters</a> possible in certain cases. The radar signals that are reflected back towards the radar receiver are the desirable ones that make radar detection work. If the object is <i>moving</i> either toward or away from the transmitter, there will be a slight change in the <a href="https://en.wikipedia.org/wiki/Frequency" target="_blank" rel="noopener">frequency</a> of the radio waves due to the <a href="https://en.wikipedia.org/wiki/Doppler_effect" target="_blank" rel="noopener">Doppler effect</a>.</p>
+<p>Radar receivers are usually, but not always, in the same location as the transmitter. The reflected radar signals captured by the receiving antenna are usually very weak. They can be strengthened by <a href="https://en.wikipedia.org/wiki/Amplifier" target="_blank" rel="noopener">electronic amplifiers</a>. More sophisticated methods of <a href="https://en.wikipedia.org/wiki/Signal_processing" target="_blank" rel="noopener">signal processing</a> are also used in order to recover useful radar signals.</p>
+<p>The absorption of radio waves by the medium through which they pass is weak and that is what enables radar sets to detect objects at relatively long ranges—ranges at which other electromagnetic wavelengths, such as <a href="https://en.wikipedia.org/wiki/Visible_light" target="_blank" rel="noopener">visible light</a>, <a href="https://en.wikipedia.org/wiki/Infrared_light" target="_blank" rel="noopener">infrared light</a>, and <a href="https://en.wikipedia.org/wiki/Ultraviolet_light" target="_blank" rel="noopener">ultraviolet light</a>, are too strongly attenuated. Weather phenomena, such as fog, clouds, rain, falling snow, and sleet, that block visible light are usually transparent to radio waves. Certain radio frequencies that are absorbed or scattered by water vapour, raindrops, or atmospheric gases (especially oxygen) are avoided when designing radars, except when their detection is intended.</p>
+<h3>Illumination</h3>
+<p>Radar relies on its own transmissions rather than light from the Sun or the Moon, or from <a href="https://en.wikipedia.org/wiki/Electromagnetic_radiation" target="_blank" rel="noopener">electromagnetic waves</a> emitted by the target objects themselves, such as infrared radiation (heat). This process of directing artificial radio waves towards objects is called <i>illumination</i>, although radio waves are invisible to the human eye as well as optical cameras.</p>
+<h3>Reflection</h3>
+<figure><a href="https://en.wikipedia.org/wiki/File:Weather_radar.jpg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/9/96/Weather_radar.jpg/250px-Weather_radar.jpg" alt="" loading="lazy" decoding="async" width="250" height="269"></a><figcaption>Brightness can indicate reflectivity as in this 1960 <a href="https://en.wikipedia.org/wiki/Weather_radar" target="_blank" rel="noopener">weather radar</a> image (of <a href="https://en.wikipedia.org/wiki/Hurricane_Abby_(1960)" target="_blank" rel="noopener">Hurricane Abby</a>). The radar's frequency, pulse form, polarization, signal processing, and antenna determine what it can observe.</figcaption></figure>
+<p>If <a href="https://en.wikipedia.org/wiki/Electromagnetic_radiation" target="_blank" rel="noopener">electromagnetic waves</a> travelling through one material meet another material, having a different <a href="https://en.wikipedia.org/wiki/Dielectric_constant" target="_blank" rel="noopener">dielectric constant</a> or <a href="https://en.wikipedia.org/wiki/Diamagnetism" target="_blank" rel="noopener">diamagnetic constant</a> from the first,
+the waves will reflect or scatter from the boundary between the materials. This means that a solid object in <a href="https://en.wikipedia.org/wiki/Earth&#x27;s_atmosphere" target="_blank" rel="noopener">air</a> or in a <a href="https://en.wikipedia.org/wiki/Vacuum" target="_blank" rel="noopener">vacuum</a>, or a significant change in atomic density between the object and what is surrounding it, will usually scatter radar (radio) waves from its surface. This is particularly true for <a href="https://en.wikipedia.org/wiki/Electrical_conduction" target="_blank" rel="noopener">electrically conductive</a> materials such as metal and carbon fibre, making radar well-suited to the detection of aircraft and ships. <a href="https://en.wikipedia.org/wiki/Radar_absorbing_material" target="_blank" rel="noopener">Radar absorbing material</a>, containing <a href="https://en.wikipedia.org/wiki/Electrical_resistance" target="_blank" rel="noopener">resistive</a> and sometimes <a href="https://en.wikipedia.org/wiki/Magnetism" target="_blank" rel="noopener">magnetic</a> substances, is used on military vehicles to <a href="https://en.wikipedia.org/wiki/Stealth_technology" target="_blank" rel="noopener">reduce radar reflection</a>. This is the radio equivalent of painting something a dark colour so that it cannot be seen by the eye at night.</p>
+<p>Radar waves scatter in a variety of ways depending on the size (wavelength) of the radio wave and the shape of the target. If the wavelength is much shorter than the target's size, the wave will bounce off in a way similar to the way light is reflected by a <a href="https://en.wikipedia.org/wiki/Mirror" target="_blank" rel="noopener">mirror</a>. If the wavelength is much longer than the size of the target, the target may not be visible because of poor reflection. Low-frequency radar technology is dependent on resonances for detection, but not identification, of targets. This is described by <a href="https://en.wikipedia.org/wiki/Rayleigh_scattering" target="_blank" rel="noopener">Rayleigh scattering</a>, an effect that creates Earth's blue sky and red sunsets. When the two length scales are comparable, there may be <a href="https://en.wikipedia.org/wiki/Resonance" target="_blank" rel="noopener">resonances</a>. Early radars used very long wavelengths that were larger than the targets and thus received a vague signal, whereas many modern systems use shorter wavelengths (a few centimetres or less) that can image objects as small as a loaf of bread.</p>
+<p>Short radio waves reflect from curves and corners in a way similar to glint from a rounded piece of glass. The most reflective targets for short wavelengths have 90° angles between the <a href="https://en.wikipedia.org/wiki/Reflection_(physics)" target="_blank" rel="noopener">reflective surfaces</a>. A <a href="https://en.wikipedia.org/wiki/Corner_reflector" target="_blank" rel="noopener">corner reflector</a> consists of three flat surfaces meeting like the inside corner of a cube. The structure will reflect waves entering its opening directly back to the source. They are commonly used as radar reflectors to make otherwise difficult-to-detect objects easier to detect. Corner reflectors on boats, for example, make them more detectable to avoid collision or during a rescue. For similar reasons, objects intended to avoid detection will not have inside corners or surfaces and edges perpendicular to likely detection directions, which leads to "odd" looking <a href="https://en.wikipedia.org/wiki/Stealth_aircraft" target="_blank" rel="noopener">stealth aircraft</a>. These precautions do not totally eliminate reflection because of <a href="https://en.wikipedia.org/wiki/Diffraction" target="_blank" rel="noopener">diffraction</a>, especially at longer wavelengths. Half wavelength long wires or strips of conducting material, such as <a href="https://en.wikipedia.org/wiki/Chaff_(countermeasure)" target="_blank" rel="noopener">chaff</a>, are very reflective but do not direct the scattered energy back toward the source. The extent to which an object reflects or scatters radio waves is called its <a href="https://en.wikipedia.org/wiki/Radar_cross-section" target="_blank" rel="noopener">radar cross-section</a>.</p>
+<h3>Radar range equation</h3>
+<p>The power <i>P<sub>r</sub></i> returning to the receiving antenna is given by the equation:</p>
+<dl><dd></dd></dl>
+<p>where</p>
+<ul><li><i>P</i><sub>t</sub> = transmitter power</li>
+<li><i>G</i><sub>t</sub> = <a href="https://en.wikipedia.org/wiki/Antenna_gain" target="_blank" rel="noopener">gain</a> of the transmitting antenna</li>
+<li><i>A</i><sub>r</sub> = <a href="https://en.wikipedia.org/wiki/Effective_aperture" target="_blank" rel="noopener">effective aperture</a> (area) of the receiving antenna; this can also be expressed as </li></ul>, where
+<dl><dd><ul></ul></dd></dl> = transmitted wavelength
+<li><i>G</i><sub>r</sub> = gain of receiving antenna</li>
+<ul><li><i>σ</i> = <a href="https://en.wikipedia.org/wiki/Radar_cross_section" target="_blank" rel="noopener">radar cross section</a>, or scattering coefficient, of the target</li>
+<li><i>F</i> = pattern propagation factor</li>
+<li><i>R</i><sub>t</sub> = distance from the transmitter to the target</li>
+<li><i>R</i><sub>r</sub> = distance from the target to the receiver.</li></ul>
+<p>In the common case where the transmitter and the receiver are at the same location, <i>R</i><sub>t</sub> = <i>R</i><sub>r</sub> and the term <i>R</i><sub>t</sub>² <i>R</i><sub>r</sub>² can be replaced by <i>R</i><sup>4</sup>, where <i>R</i> is the range.
+This yields:</p>
+<dl><dd></dd></dl>
+<p>This shows that the received power declines as the fourth power of the range, which means that the received power from distant targets is relatively very small.</p>
+<p>Additional filtering and pulse integration modifies the radar equation slightly for <a href="https://en.wikipedia.org/wiki/Pulse-Doppler_radar#Performance" target="_blank" rel="noopener">pulse-Doppler radar performance</a>, which can be used to increase detection range and reduce transmit power.</p>
+<p>The equation above with <i>F</i> = 1 is a simplification for transmission in a vacuum without interference. The propagation factor accounts for the effects of <a href="https://en.wikipedia.org/wiki/Multipath_propagation" target="_blank" rel="noopener">multipath</a> and shadowing and depends on the details of the environment. In a real-world situation, <a href="https://en.wikipedia.org/wiki/Pathloss" target="_blank" rel="noopener">pathloss</a> effects are also  considered.</p>
+<h3>Doppler effect</h3>
+<figure><a href="https://en.wikipedia.org/wiki/File:Doppler_effect_diagrammatic.svg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7f/Doppler_effect_diagrammatic.svg/330px-Doppler_effect_diagrammatic.svg.png" alt="" loading="lazy" decoding="async" width="300" height="96"></a><figcaption>Change of <a href="https://en.wikipedia.org/wiki/Wavelength" target="_blank" rel="noopener">wavelength</a> caused by motion of the source</figcaption></figure>
+<p>Frequency shift is caused by motion that changes the number of wavelengths between the reflector and the radar. This can degrade or enhance radar performance depending upon how it affects the detection process. As an example, <a href="https://en.wikipedia.org/wiki/Moving_target_indication" target="_blank" rel="noopener">moving target indication</a> can interact with Doppler to produce signal cancellation at certain radial velocities, which degrades performance.</p>
+<p>Sea-based radar systems, <a href="https://en.wikipedia.org/wiki/Semi-active_radar_homing" target="_blank" rel="noopener">semi-active radar homing</a>, <a href="https://en.wikipedia.org/wiki/Active_radar_homing" target="_blank" rel="noopener">active radar homing</a>, <a href="https://en.wikipedia.org/wiki/Weather_radar" target="_blank" rel="noopener">weather radar</a>, military aircraft, and <a href="https://en.wikipedia.org/wiki/Radar_astronomy" target="_blank" rel="noopener">radar astronomy</a> rely on the Doppler effect to enhance performance. This produces information about target velocity during the detection process. This also allows small objects to be detected in an environment containing much larger nearby slow moving objects.</p>
+<p>Doppler shift depends upon whether the radar configuration is active or passive. Active radar transmits a signal that is reflected back to the receiver. Passive radar depends upon the object sending a signal to the receiver.</p>
+<p>The Doppler frequency shift for active radar is as follows, where </p> is Doppler frequency,  is transmit frequency,  is radial velocity, and  is the speed of light:
+<dl><dd></dd></dl>.
+<p>Passive radar is applicable to <a href="https://en.wikipedia.org/wiki/Electronic_countermeasures" target="_blank" rel="noopener">electronic countermeasures</a> and <a href="https://en.wikipedia.org/wiki/Radio_astronomy" target="_blank" rel="noopener">radio astronomy</a> as follows:</p>
+<dl><dd></dd></dl>.
+<p>Only the radial component of the velocity is relevant. When the reflector is moving at right angle to the radar beam, it has no relative velocity. Objects moving parallel to the radar beam produce the maximum Doppler frequency shift.</p>
+<p>When the transmit frequency (</p>) is pulsed, using a pulse repeat frequency of , the resulting frequency spectrum will contain harmonic frequencies above and below  with a distance of . As a result, the Doppler measurement is only non-ambiguous if the Doppler frequency shift is less than half of , called the <a href="https://en.wikipedia.org/wiki/Nyquist_frequency" target="_blank" rel="noopener">Nyquist frequency</a>, since the returned frequency otherwise cannot be distinguished from shifting of a harmonic frequency above or below, thus requiring:
+<dl><dd></dd></dl>
+<p>Or when substituting with </p>:
+<dl><dd></dd></dl>
+<p>As an example, a Doppler weather radar with a pulse rate of 2 kHz and transmit frequency of 1 GHz can reliably measure weather speed up to at most 150 m/s (340 mph), thus cannot reliably determine radial velocity of aircraft moving 1,000 m/s (2,200 mph).</p>
+<h3>Polarization</h3>
+<p>In all <a href="https://en.wikipedia.org/wiki/Electromagnetic_radiation" target="_blank" rel="noopener">electromagnetic radiation</a>, the electric field is perpendicular to the direction of propagation, and the electric field direction is the <a href="https://en.wikipedia.org/wiki/Polarization_(waves)" target="_blank" rel="noopener">polarization</a> of the wave. For a transmitted radar signal, the polarization can be controlled to yield different effects. Radars use horizontal, vertical, linear, and circular polarization to detect different types of reflections. For example, <a href="https://en.wikipedia.org/wiki/Circular_polarization" target="_blank" rel="noopener">circular polarization</a> is used to minimize the interference caused by rain. <a href="https://en.wikipedia.org/wiki/Linear_polarization" target="_blank" rel="noopener">Linear polarization</a> returns usually indicate metal surfaces. Random polarization returns usually indicate a <a href="https://en.wikipedia.org/wiki/Fractal" target="_blank" rel="noopener">fractal</a> surface, such as rocks or soil, and are used by navigation radars.</p>
+<h3>Limiting factors</h3>
+<h4>Beam path and range</h4>
+<figure><a href="https://en.wikipedia.org/wiki/File:Radar-hauteur-en.svg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b9/Radar-hauteur-en.svg/500px-Radar-hauteur-en.svg.png" alt="" loading="lazy" decoding="async" width="380" height="211"></a><figcaption>Echo heights above ground</figcaption></figure> Where :   r : distance radar-target ke : 4/3 ae : Earth radius θe : elevation angle above the radar horizon ha : height of the feedhorn above ground
+<p>A radar beam follows a linear path in vacuum but follows a somewhat curved path in atmosphere due to variation in the <a href="https://en.wikipedia.org/wiki/Refractive_index" target="_blank" rel="noopener">refractive index</a> of air, which is called the <a href="https://en.wikipedia.org/wiki/Radar_horizon" target="_blank" rel="noopener">radar horizon</a>. Even when the beam is emitted parallel to the ground, the beam rises above the ground as the <a href="https://en.wikipedia.org/wiki/Figure_of_the_Earth" target="_blank" rel="noopener">curvature of the Earth</a> sinks below the horizon. Furthermore, the signal is attenuated by the medium the beam crosses, and the beam disperses.</p>
+<p>The maximum range of conventional radar can be limited by a number of factors:</p>
+<ul><li>Line of sight, which depends on the height above the ground. Without a direct line of sight, the path of the beam is blocked.</li>
+<li>The maximum non-ambiguous range, which is determined by the <a href="https://en.wikipedia.org/wiki/Pulse_repetition_frequency" target="_blank" rel="noopener">pulse repetition frequency</a>. The maximum non-ambiguous range is the distance the pulse can travel to and return from before the next pulse is emitted.</li>
+<li>Radar sensitivity and the power of the return signal as computed in the radar equation. This component includes factors such as the environmental conditions and the size (or radar cross section) of the target.</li></ul>
+<h4>Noise</h4>
+<p>Signal noise is an internal source of random variations in the signal, which is generated by all electronic components.</p>
+<p>Reflected signals decline rapidly as distance increases, so noise introduces a radar range limitation. The <a href="https://en.wikipedia.org/wiki/Noise_floor" target="_blank" rel="noopener">noise floor</a> and <a href="https://en.wikipedia.org/wiki/Signal-to-noise_ratio" target="_blank" rel="noopener">signal-to-noise ratio</a> are two different <a href="https://en.wikipedia.org/wiki/Test_and_evaluation_master_plan#Measures_of_Performance" target="_blank" rel="noopener">measures of performance</a> that affect range performance. Reflectors that are too far away produce too little signal to exceed the noise floor and cannot be detected. <a href="https://en.wikipedia.org/wiki/Detection" target="_blank" rel="noopener">Detection</a> requires a signal that exceeds the <a href="https://en.wikipedia.org/wiki/Noise_floor" target="_blank" rel="noopener">noise floor</a> by at least the signal-to-noise ratio.</p>
+<p>Noise typically appears as random variations superimposed on the desired echo signal received in the radar receiver. The lower the power of the desired signal, the more difficult it is to discern it from the noise. The <a href="https://en.wikipedia.org/wiki/Noise_figure" target="_blank" rel="noopener">noise figure</a> is a measure of the noise produced by a receiver compared to an ideal receiver, and this needs to be minimized.</p>
+<p><a href="https://en.wikipedia.org/wiki/Shot_noise" target="_blank" rel="noopener">Shot noise</a> is produced by electrons in transit across a discontinuity, which occurs in all detectors. Shot noise is the dominant source in most receivers. There will also be <a href="https://en.wikipedia.org/wiki/Flicker_noise" target="_blank" rel="noopener">flicker noise</a> caused by electron transit through amplification devices, which is reduced using <a href="https://en.wikipedia.org/wiki/Heterodyne" target="_blank" rel="noopener">heterodyne</a> amplification. Another reason for heterodyne processing is that for fixed fractional bandwidth, the instantaneous bandwidth increases linearly in frequency. This allows improved range resolution. The one notable exception to heterodyne (downconversion) radar systems is <a href="https://en.wikipedia.org/wiki/Ultra-wideband" target="_blank" rel="noopener">ultra-wideband</a> radar. Here a single cycle, or transient wave, is used similar to UWB communications, see <a href="https://en.wikipedia.org/wiki/List_of_UWB_channels" target="_blank" rel="noopener">List of UWB channels</a>.</p>
+<p>Noise is also generated by external sources, most importantly the natural thermal radiation of the background surrounding the target of interest. In modern radar systems, the internal noise is typically about equal to or lower than the external noise. An exception is if the radar is aimed upwards at clear sky, where the scene is so "cold" that it generates very little <a href="https://en.wikipedia.org/wiki/Thermal_noise" target="_blank" rel="noopener">thermal noise</a>. The thermal noise is given by <i>k</i><sub>B</sub> <i>T</i> <i>B</i>, where <i>T</i> is temperature, <i>B</i> is bandwidth (post matched filter) and <i>k</i><sub>B</sub> is the <a href="https://en.wikipedia.org/wiki/Boltzmann_constant" target="_blank" rel="noopener">Boltzmann constant</a>. There is an appealing intuitive interpretation of this relationship in a radar. Matched filtering allows the entire energy received from a target to be compressed into a single bin (be it a range, Doppler, elevation, or azimuth bin). On the surface it appears that then within a fixed interval of time, perfect, error free, detection could be obtained. This is done by compressing all energy into an infinitesimal time slice. What limits this approach in the real world is that, while time is arbitrarily divisible, current is not. The quantum of electrical energy is an electron, and so the best that can be done is to match filter all energy into a single electron. Since the electron is moving at a certain temperature (<a href="https://en.wikipedia.org/wiki/Black_body" target="_blank" rel="noopener">Planck spectrum</a>) this noise source cannot be further eroded. Ultimately, radar, like all macro-scale entities, is profoundly impacted by quantum theory.</p>
+<p>Noise is random and target signals are not. Signal processing can take advantage of this phenomenon to reduce the noise floor using two strategies. The kind of signal integration used with <a href="https://en.wikipedia.org/wiki/Moving_target_indication" target="_blank" rel="noopener">moving target indication</a> can improve noise up to </p> for each stage. The signal can also be split among multiple filters for <a href="https://en.wikipedia.org/wiki/Pulse-Doppler_signal_processing" target="_blank" rel="noopener">pulse-Doppler signal processing</a>, which reduces the noise floor by the number of filters. These improvements depend upon <a href="https://en.wikipedia.org/wiki/Coherence_(physics)" target="_blank" rel="noopener">coherence</a>.
+<h4>Interference</h4>
+<p>Radar systems must overcome unwanted signals in order to focus on the targets of interest. These unwanted signals may originate from internal and external sources, both passive and active. The ability of the radar system to overcome these unwanted signals defines its <a href="https://en.wikipedia.org/wiki/Signal-to-noise_ratio" target="_blank" rel="noopener">signal-to-noise ratio</a> (SNR). SNR is defined as the ratio of the signal power to the noise power within the desired signal; it compares the level of a desired target signal to the level of background noise (atmospheric noise and noise generated within the receiver). The higher a system's SNR the better it is at discriminating actual targets from noise signals.</p>
+<h4>Clutter</h4>
+<figure><a href="https://en.wikipedia.org/wiki/File:Multipath_propagation_diagram_en.svg" target="_blank" rel="noopener"><img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f2/Multipath_propagation_diagram_en.svg/250px-Multipath_propagation_diagram_en.svg.png" alt="" loading="lazy" decoding="async" width="250" height="177"></a><figcaption>Radar multipath <a href="https://en.wikipedia.org/wiki/Light_echo" target="_blank" rel="noopener">echoes</a> from a target cause ghosts to appear</figcaption></figure>
+<p>Clutter refers to radio frequency (RF) echoes returned from targets which are uninteresting to radar operators. Such targets include man-made objects such as buildings and — intentionally — by radar countermeasures such as <a href="https://en.wikipedia.org/wiki/Chaff_(countermeasure)" target="_blank" rel="noopener">chaff</a>. Such targets also include natural objects such as ground, sea, and — when not being tasked for meteorological purposes — <a href="https://en.wikipedia.org/wiki/Precipitation" target="_blank" rel="noopener">precipitation</a>, <a href="https://en.wikipedia.org/wiki/Hail_spike" target="_blank" rel="noopener">hail spike</a>, <a href="https://en.wikipedia.org/wiki/Dust_storm" target="_blank" rel="noopener">dust storms</a>, animals (especially birds), turbulence in the <a href="https://en.wikipedia.org/wiki/Atmospheric_circulation" target="_blank" rel="noopener">atmospheric circulation</a>, and <a href="https://en.wikipedia.org/wiki/Meteoroid" target="_blank" rel="noopener">meteor</a> trails. Radar clutter can also be caused by other atmospheric phenomena, such as disturbances in the <a href="https://en.wikipedia.org/wiki/Ionosphere" target="_blank" rel="noopener">ionosphere</a> caused by <a href="https://en.wikipedia.org/wiki/Geomagnetic_storm" target="_blank" rel="noopener">geomagnetic storms</a> or other <a href="https://en.wikipedia.org/wiki/Space_weather" target="_blank" rel="noopener">space weather</a> events. This phenomenon is especially apparent near the <a href="https://en.wikipedia.org/wiki/Geomagnetic_pole" target="_blank" rel="noopener">geomagnetic poles</a>, where the action of the <a href="https://en.wikipedia.org/wiki/Solar_wind" target="_blank" rel="noopener">solar wind</a> on the earth's <a href="https://en.wikipedia.org/wiki/Magnetosphere" target="_blank" rel="noopener">magnetosphere</a> produces convection patterns in the ionospheric <a href="https://en.wikipedia.org/wiki/Plasma_(physics)" target="_blank" rel="noopener">plasma</a>. Radar clutter can degrade the ability of <a href="https://en.wikipedia.org/wiki/Over-the-horizon_radar" target="_blank" rel="noopener">over-the-horizon radar</a> to detect targets.</p>
+<p>Some clutter may also be caused by a long radar <a href="https://en.wikipedia.org/wiki/Waveguide" target="_blank" rel="noopener">waveguide</a> between the radar transceiver and the antenna. In a typical <a href="https://en.wikipedia.org/wiki/Plan_position_indicator" target="_blank" rel="noopener">plan position indicator</a> (PPI) radar with a rotating antenna, this will usually be seen as a "sun" or "sunburst" in the center of the display as the receiver responds to echoes from dust particles and misguided RF in the waveguide. Adjusting the timing between when the transmitter sends a pulse and when the receiver stage is enabled will generally reduce the sunburst without affecting the accuracy of the range since most sunburst is caused by a diffused transmit pulse reflected before it leaves the antenna. Clutter is considered a passive interference source since it only appears in response to radar signals sent by the radar.</p>
+<p>Clutter is detected and neutralized in several ways. Clutter tends to appear static between radar scans; on subsequent scan echoes, desirable targets will appear to move, and all stationary echoes can be eliminated. Sea clutter can be reduced by using horizontal polarization, while rain is reduced with <a href="https://en.wikipedia.org/wiki/Circular_polarization" target="_blank" rel="noopener">circular polarization</a> (meteorological radars wish for the opposite effect, and therefore use <a href="https://en.wikipedia.org/wiki/Linear_polarization" target="_blank" rel="noopener">linear polarization</a> to detect precipitation). Other methods attempt to increase the signal-to-clutter ratio.</p>
+<p>Clutter moves with the wind or is stationary. Two common strategies to improve <a href="https://en.wikipedia.org/wiki/Test_and_evaluation_master_plan#Performance_evaluation" target="_blank" rel="noopener">measures of performance</a> in a clutter environment are:</p>
+<dl><dd><ul><li>Moving target indication, which integrates successive pulses</li>
+<li>Doppler processing, which uses filters to separate clutter from desirable signals</li></ul></dd></dl>
+<p>The most effective clutter reduction technique is <a href="https://en.wikipedia.org/wiki/Pulse-Doppler_radar" target="_blank" rel="noopener">pulse-Doppler radar</a>. Doppler separates clutter from aircraft and spacecraft using a <a href="https://en.wikipedia.org/wiki/Radar_signal_characteristics#In_the_frequency_domain" target="_blank" rel="noopener">frequency spectrum</a>, so individual signals can be separated from multiple reflectors located in the same volume using velocity differences. This requires a coherent transmitter. Another technique uses a <a href="https://en.wikipedia.org/wiki/Moving_target_indication" target="_blank" rel="noopener">moving target indicator</a> that subtracts the received signal from two successive pulses using phase to reduce signals from slow-moving objects. This can be adapted for systems that lack a coherent transmitter, such as <a href="https://en.wikipedia.org/wiki/Radar_signal_characteristics#Unambiguous_range" target="_blank" rel="noopener">time-domain pulse-amplitude radar</a>.</p>
+<p><a href="https://en.wikipedia.org/wiki/Constant_false_alarm_rate" target="_blank" rel="noopener">Constant false alarm rate</a>, a form of <a href="https://en.wikipedia.org/wiki/Automatic_gain_control" target="_blank" rel="noopener">automatic gain control</a> (AGC), is a method that relies on clutter returns far outnumbering echoes from targets of interest. The receiver's gain is automatically adjusted to maintain a constant level of overall visible clutter. While this does not help detect targets masked by stronger surrounding clutter, it does help to distinguish strong target sources. In the past, radar AGC was electronically controlled and affected the gain of the entire radar receiver. As radars evolved, AGC became computer-software-controlled and affected the gain with greater granularity in specific detection cells.</p>
+<p>Clutter may also originate from multipath echoes from valid targets caused by ground reflection, <a href="https://en.wikipedia.org/wiki/Atmospheric_duct" target="_blank" rel="noopener">atmospheric ducting</a> or <a href="https://en.wikipedia.org/wiki/Skywave" target="_blank" rel="noopener">ionospheric reflection</a>/<a href="https://en.wikipedia.org/wiki/Refraction" target="_blank" rel="noopener">refraction</a> (e.g., <a href="https://en.wikipedia.org/wiki/Anomalous_propagation" target="_blank" rel="noopener">anomalous propagation</a>). This clutter type is especially bothersome since it appears to move and behave like other normal (point) targets of interest. In a typical scenario, an aircraft echo is reflected from the ground below, appearing to the receiver as an identical target below the correct one. The radar may try to unify the targets, reporting the target at an incorrect height, or eliminating it on the basis of <a href="https://en.wikipedia.org/wiki/Jitter" target="_blank" rel="noopener">jitter</a> or a physical impossibility. Terrain bounce jamming exploits this response by amplifying the radar signal and directing it downward. These problems can be overcome by incorporating a ground map of the radar's surroundings and eliminating all echoes which appear to originate below ground or above a certain height. Monopulse can be improved by altering the elevation algorithm used at low elevation. In newer air traffic control radar equipment, algorithms are used to identify the false targets by comparing the current pulse returns to those adjacent, as well as calculating return improbabilities.</p>
+<h4>Jamming</h4>
+<p>Radar jamming refers to radio frequency signals originating from sources outside the radar, transmitting in the radar's frequency and thereby masking targets of interest. Jamming may be intentional, as with an <a href="https://en.wikipedia.org/wiki/Electronic_warfare" target="_blank" rel="noopener">electronic warfare</a> tactic, or unintentional, as with friendly forces operating equipment that transmits using the same frequency range. Jamming is considered an active interference source, since it is initiated by elements outside the radar and in general unrelated to the radar signals.</p>
+<p>Jamming is problematic to radar since the jamming signal only needs to travel one way (from the jammer to the radar receiver) whereas the radar echoes travel two ways (radar-target-radar) and are therefore significantly reduced in power by the time they return to the radar receiver in accordance with <a href="https://en.wikipedia.org/wiki/Inverse-square_law" target="_blank" rel="noopener">inverse-square law</a>. Jammers therefore can be much less powerful than their jammed radars and still effectively mask targets along the <a href="https://en.wikipedia.org/wiki/Line-of-sight_propagation" target="_blank" rel="noopener">line of sight</a> from the jammer to the radar (<i>mainlobe jamming</i>). Jammers have an added effect of affecting radars along other lines of sight through the radar receiver's <a href="https://en.wikipedia.org/wiki/Sidelobe" target="_blank" rel="noopener">sidelobes</a> (<i>sidelobe jamming</i>).</p>
+<p>Mainlobe jamming can generally only be reduced by narrowing the mainlobe <a href="https://en.wikipedia.org/wiki/Solid_angle" target="_blank" rel="noopener">solid angle</a> and cannot fully be eliminated when directly facing a jammer which uses the same frequency and polarization as the radar. Sidelobe jamming can be overcome by reducing receiving sidelobes in the radar antenna design and by using an <a href="https://en.wikipedia.org/wiki/Omnidirectional_antenna" target="_blank" rel="noopener">omnidirectional antenna</a> to detect and disregard non-mainlobe signals. <a href="https://en.wikipedia.org/wiki/Electronic_counter-counter-measures" target="_blank" rel="noopener">Other anti-jamming techniques</a> are <a href="https://en.wikipedia.org/wiki/Frequency_hopping" target="_blank" rel="noopener">frequency hopping</a> and <a href="https://en.wikipedia.org/wiki/Polarization_(waves)" target="_blank" rel="noopener">polarization</a>.</p>
+
+  <footer>
+    Text and images: excerpt (introduction, History, Applications, Principles) of the Wikipedia article
+    <a href="https://en.wikipedia.org/wiki/Radar" target="_blank" rel="noopener">“Radar”</a>,
+    available under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>.
+    References removed. Each image links to its file page on Wikimedia Commons, with its author and licence.
+  </footer>
+</article>
+
+<canvas id="dark" aria-hidden="true"></canvas>
+
+<div id="scope" aria-hidden="true">
+  <div class="sweep"></div>
+  <div class="readout"><span id="db">RX --</span><span class="meter"><i></i></span></div>
+</div>
+
+<div id="hud">
+  <a href="../">← Vibe Coding Log</a>
+  <span id="status">LANTERN · standby</span>
+</div>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+  <div class="card">
+    <h2 id="intro-title">Lantern</h2>
+    <p>This page is dark. Move the square over it and make noise (speak, hum, clap) to light up what is underneath.</p>
+    <p>The louder you are, the brighter it gets. Silence shows nothing. What you have lit fades out once the square moves on.</p>
+    <p class="err" id="err" hidden></p>
+    <div class="actions">
+      <button id="start" type="button">Turn on microphone</button>
+      <button id="nomic" type="button" class="ghost">Use the space bar</button>
+    </div>
+    <p class="small">No sound leaves your computer. Without a microphone, hold Space to make light.<br>
+      Article: <a href="https://en.wikipedia.org/wiki/Radar" target="_blank" rel="noopener">Wikipedia, “Radar”</a>, CC BY-SA 4.0.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const CELL = 6;          // px of page per cell of the light map
+  const FADE = 1.6;        // s, time constant of the fade once the scope has moved on
+  const RISE = 0.12;       // s, how fast a cell catches up with the current loudness
+
+  const root = document.documentElement;
+  const dark = document.getElementById('dark');
+  const ctx = dark.getContext('2d');
+  const scope = document.getElementById('scope');
+  const dbEl = document.getElementById('db');
+  const statusEl = document.getElementById('status');
+  const intro = document.getElementById('intro');
+  const errEl = document.getElementById('err');
+
+  // ---- Light map, in page coordinates. Each cell keeps a value and the time it was set;
+  //      its current light is value * exp(-(now - time) / FADE), so nothing needs updating off screen.
+  let cols = 0, rows = 0, val = new Float32Array(0), at = new Float32Array(0);
+  function fitMap() {
+    const c = Math.ceil(root.scrollWidth / CELL), r = Math.ceil(root.scrollHeight / CELL) + 1;
+    if (c === cols && r === rows) return;
+    const nv = new Float32Array(c * r), na = new Float32Array(c * r);
+    for (let y = 0; y < Math.min(r, rows); y++)
+      for (let x = 0; x < Math.min(c, cols); x++) { nv[y * c + x] = val[y * cols + x]; na[y * c + x] = at[y * cols + x]; }
+    cols = c; rows = r; val = nv; at = na;
+  }
+
+  // ---- Darkness canvas: one pixel per cell, stretched by CSS so the browser smooths the edges
+  let vc = 0, vr = 0, img = null, size = 180;
+  function fitView() {
+    vc = Math.ceil(innerWidth / CELL) + 1;
+    vr = Math.ceil(innerHeight / CELL) + 1;
+    dark.width = vc; dark.height = vr;
+    dark.style.width = vc * CELL + 'px';
+    dark.style.height = vr * CELL + 'px';
+    img = ctx.createImageData(vc, vr);
+    size = Math.round(Math.max(130, Math.min(220, Math.min(innerWidth, innerHeight) * 0.24)));
+    scope.style.setProperty('--size', size + 'px');
+    fitMap();
+  }
+  addEventListener('resize', fitView);
+  new ResizeObserver(fitMap).observe(document.body);
+  fitView();
+
+  // ---- Pointer
+  let px = 0, py = 0, inside = false;
+  addEventListener('pointermove', e => { px = e.clientX; py = e.clientY; inside = true; });
+  addEventListener('pointerdown', e => { px = e.clientX; py = e.clientY; inside = true; });
+  document.addEventListener('pointerleave', () => { inside = false; });
+  root.addEventListener('mouseleave', () => { inside = false; });
+
+  // ---- Sound level, 0..1
+  let analyser = null, buf = null, noiseFloor = -50, level = 0, space = false, db = -100;
+  addEventListener('keydown', e => { if (e.code === 'Space' && root.classList.contains('live')) { space = true; e.preventDefault(); } });
+  addEventListener('keyup', e => { if (e.code === 'Space') space = false; });
+
+  function readLoudness(dt) {
+    let target = 0;
+    if (analyser) {
+      analyser.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      db = 20 * Math.log10(Math.sqrt(s / buf.length) + 1e-9);
+      // the floor follows quiet moments down at once and creeps up by 1.5 dB/s, so room hum is ignored
+      noiseFloor = db < noiseFloor ? db : noiseFloor + 1.5 * dt;
+      noiseFloor = Math.max(-90, Math.min(noiseFloor, -25));
+      target = Math.max(0, Math.min(1, (db - (noiseFloor + 8)) / 30));
+    }
+    if (space) target = Math.max(target, 0.85);
+    const k = 1 - Math.exp(-dt / (target > level ? 0.05 : 0.25));
+    level += (target - level) * k;
+    return level;
+  }
+
+  // ---- Frame
+  let last = performance.now() / 1000;
+  function frame() {
+    const now = performance.now() / 1000, dt = Math.min(0.1, now - last); last = now;
+    const lvl = readLoudness(dt);
+    const sx = scrollX, sy = scrollY;
+
+    // light up the cells under the scope
+    if (inside && root.classList.contains('live') && lvl > 0.01) {
+      const half = size / 2, k = 1 - Math.exp(-dt / RISE);
+      const x0 = Math.max(0, Math.floor((px + sx - half) / CELL)), x1 = Math.min(cols - 1, Math.floor((px + sx + half) / CELL));
+      const y0 = Math.max(0, Math.floor((py + sy - half) / CELL)), y1 = Math.min(rows - 1, Math.floor((py + sy + half) / CELL));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const i = y * cols + x;
+        let v = val[i] * Math.exp(-(now - at[i]) / FADE);
+        if (lvl > v) v += (lvl - v) * k;
+        val[i] = v; at[i] = now;
+      }
+    }
+
+    // paint the darkness for the visible part of the page
+    const c0 = Math.floor(sx / CELL), r0 = Math.floor(sy / CELL), d = img.data;
+    for (let y = 0; y < vr; y++) {
+      const r = r0 + y, rowOk = r < rows;
+      for (let x = 0; x < vc; x++) {
+        const c = c0 + x, o = (y * vc + x) * 4 + 3;
+        let light = 0;
+        if (rowOk && c < cols) { const i = r * cols + c; if (val[i] > 0) light = val[i] * Math.exp(-(now - at[i]) / FADE); }
+        d[o] = 255 * (1 - Math.min(1, light * 1.15));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    dark.style.transform = `translate(${-(sx % CELL)}px, ${-(sy % CELL)}px)`;
+
+    // scope
+    scope.classList.toggle('on', inside);
+    scope.style.transform = `translate(${px}px, ${py}px)`;
+    scope.style.setProperty('--lvl', lvl.toFixed(3));
+    dbEl.textContent = analyser ? `RX ${String(Math.round(Math.max(0, db + 100))).padStart(3, '0')}` : (space ? 'RX MAN' : 'RX ---');
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---- Start
+  function go(withMic) {
+    intro.hidden = true;
+    root.classList.add('live');
+    statusEl.textContent = withMic ? 'LANTERN · microphone on · make noise to see' : 'LANTERN · hold Space to see';
+  }
+  document.getElementById('start').addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      await ac.resume();
+      analyser = ac.createAnalyser();
+      analyser.fftSize = 1024;
+      buf = new Float32Array(analyser.fftSize);
+      ac.createMediaStreamSource(stream).connect(analyser);
+      go(true);
+    } catch (e) {
+      errEl.hidden = false;
+      errEl.textContent = 'The microphone could not be opened (' + (e && e.name || 'error') +
+        '). Allow it in the browser’s address bar and try again, or use the space bar.';
+    }
+  });
+  document.getElementById('nomic').addEventListener('click', () => go(false));
+})();
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 
 **Live site: [mauriceeggel.github.io/vibe-coding-test](https://mauriceeggel.github.io/vibe-coding-test/)**
 
+- [2026-10-14 · Lantern](https://mauriceeggel.github.io/vibe-coding-test/26-10-14-lantern/) ([code](26-10-14-lantern/))
 - [2026-10-08 · Shared Listening Room](https://mauriceeggel.github.io/vibe-coding-test/26-10-08-soundroom/) ([code](26-10-08-soundroom/))
 
 Small web experiments built by vibe coding, for the course *Creative Coding: Future of Web* (2026–2027).
@@ -12,6 +13,7 @@ The site is published with GitHub Pages. The home page (`index.html`) lists ever
 
 | Date | Project | Folder |
 | --- | --- | --- |
+| 2026-10-14 | Lantern | [`26-10-14-lantern/`](26-10-14-lantern/) |
 | 2026-10-08 | Shared Listening Room | [`26-10-08-soundroom/`](26-10-08-soundroom/) |
 
 ## Structure
@@ -19,6 +21,8 @@ The site is published with GitHub Pages. The home page (`index.html`) lists ever
 ```
 .
 ├── index.html              home page: the list of projects
+├── 26-10-14-lantern/
+│   └── index.html          Lantern
 ├── 26-10-08-soundroom/
 │   └── index.html          Shared Listening Room
 ├── README.md
@@ -35,3 +39,4 @@ The site is published with GitHub Pages. The home page (`index.html`) lists ever
 ## Notes
 
 - Shared Listening Room is also published on claude.ai, where visitors who have the page open at the same time hear each other. On GitHub Pages there is no shared room: each visitor is alone, with the simulated presences.
+- Lantern needs the microphone, which browsers only allow over HTTPS or on `localhost` (GitHub Pages is HTTPS). Without a microphone, holding Space makes light too.
