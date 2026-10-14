@@ -103,12 +103,7 @@ html.live #scope.on{display:block}
 .card .small{font-size:.78rem; color:var(--phos-dim)}
 .card .small a{color:inherit}
 .card .err{color:#ffb35c; text-shadow:none}
-.callsign{display:grid; gap:6px; margin:16px 0 0}
-.callsign span{font-size:.78rem; color:var(--phos-dim); letter-spacing:.08em; text-transform:uppercase}
-.callsign input{font:inherit; font-size:1rem; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--phos); background:#000;
-  border:1px solid var(--phos-dim); padding:8px 10px; width:100%; max-width:14ch; caret-color:var(--phos)}
-.callsign input:focus-visible{outline:2px solid var(--phos); outline-offset:2px}
-.actions{display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 14px}
+.actions{display:flex; flex-wrap:wrap; gap:10px; margin:0 0 14px}
 .card button{font:inherit; font-weight:600; letter-spacing:.06em; color:#000; background:var(--phos); border:0; padding:10px 16px; cursor:pointer;
   box-shadow:0 0 16px var(--glow)}
 .card button.ghost{background:transparent; color:var(--phos); border:1px solid var(--phos-dim); box-shadow:none}
@@ -266,27 +261,34 @@ This yields:</p>
 
 <div id="scope" aria-hidden="true">
   <div class="sweep"></div>
-  <div class="readout"><span id="callsign">----</span><span class="meter"><i></i></span></div>
+  <div class="readout"><span class="meter"><i></i></span></div>
 </div>
 
-<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+<div id="intro" role="dialog" aria-modal="true" aria-label="Lantern">
   <div class="card">
-    <h2 id="intro-title">Lantern</h2>
-    <p>This page is dark. Move the square over it and make noise (speak, hum, clap) to light up what is underneath.</p>
-    <p>The louder you are, the brighter it gets. Silence shows nothing. What you have lit fades out once the square moves on.</p>
-    <label class="callsign"><span>Your name on the scope</span>
-      <input id="name" type="text" maxlength="10" autocomplete="nickname" spellcheck="false" placeholder="max 10 letters"></label>
     <p class="err" id="err" hidden></p>
     <div class="actions">
       <button id="start" type="button">Turn on microphone</button>
       <button id="nomic" type="button" class="ghost">Use the space bar</button>
     </div>
-    <p class="small">No sound leaves your computer. Without a microphone, hold Space to make light.<br>
-      Article: <a href="https://en.wikipedia.org/wiki/Radar" target="_blank" rel="noopener">Wikipedia, “Radar”</a>, CC BY-SA 4.0.</p>
+    <p class="small">Article: <a href="https://en.wikipedia.org/wiki/Radar" target="_blank" rel="noopener">Wikipedia, “Radar”</a></p>
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script>
+// Same Firebase project as the Shared Listening Room; Lantern uses its own branch, lantern-v1.
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBRBVKFWJQUuRbbEpFQQsUakYUcaiXB1VE",
+  authDomain:        "vibe-724ae.firebaseapp.com",
+  databaseURL:       "https://vibe-724ae-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "vibe-724ae",
+  storageBucket:     "vibe-724ae.firebasestorage.app",
+  messagingSenderId: "385206351842",
+  appId:             "1:385206351842:web:aa47b2a23c8a32a26e6bbb",
+};
+
 (() => {
   const CELL = 6;          // px of page per cell of the light map
   const FADE = 0.9;        // s, time constant of the fade once the scope has moved on
@@ -303,8 +305,6 @@ This yields:</p>
   const dark = document.getElementById('dark');
   const ctx = dark.getContext('2d');
   const scope = document.getElementById('scope');
-  const callsignEl = document.getElementById('callsign');
-  const nameInput = document.getElementById('name');
   const intro = document.getElementById('intro');
   const errEl = document.getElementById('err');
 
@@ -438,6 +438,66 @@ This yields:</p>
     return level;
   }
 
+  function shine(cx, cy, side, lvl, now, dt) {
+    const half = side / 2, k = 1 - Math.exp(-dt / RISE);
+    const x0 = Math.max(0, Math.floor((cx - half) / CELL)), x1 = Math.min(cols - 1, Math.floor((cx + half) / CELL));
+    const y0 = Math.max(0, Math.floor((cy - half) / CELL)), y1 = Math.min(rows - 1, Math.floor((cy + half) / CELL));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = y * cols + x;
+      let v = val[i] * Math.exp(-(now - at[i]) / FADE);
+      if (lvl > v) v += (lvl - v) * k;
+      val[i] = v; at[i] = now;
+    }
+  }
+
+  // ---- Other visitors. Each one publishes where their scope is and how loud they are; we shine
+  //      with their scope on our copy of the page, without drawing its border.
+  //      Positions are measured from the top left of the article, so they land on the same words
+  //      as long as both windows are wide enough for the full 900 px column.
+  const ME = Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+  const ROOM = 'lantern-v1/scopes';
+  const others = new Map();
+  let db = null, sentAt = 0, sentLevel = 0;
+  function docOrigin() { const r = doc.getBoundingClientRect(); return [r.left + scrollX, r.top + scrollY]; }
+
+  function shareMine(x, y, lvl, now) {
+    if (!db || now - sentAt < 0.08) return;
+    if (lvl < 0.01 && sentLevel < 0.01) return; // nothing new to say while silent
+    sentAt = now; sentLevel = lvl < 0.01 ? 0 : lvl;
+    const [ox, oy] = docOrigin();
+    db.ref(`${ROOM}/${ME}`).set({ x: Math.round(x - ox), y: Math.round(y - oy), l: +sentLevel.toFixed(3), s: size }).catch(() => {});
+  }
+  function shineOthers(now, dt) {
+    if (!others.size) return;
+    const [ox, oy] = docOrigin(), k = 1 - Math.exp(-dt / 0.08);
+    for (const o of others.values()) {
+      // ease toward the last position received, and go dark if nothing has arrived for a while
+      const target = now - o.got > 1.5 ? 0 : o.tl;
+      o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k; o.l += (target - o.l) * k;
+      if (o.l > 0.01) shine(o.x + ox, o.y + oy, o.s, o.l, now, dt);
+    }
+  }
+  function connect() {
+    if (typeof firebase === 'undefined') return;
+    try {
+      db = firebase.database(firebase.initializeApp(FIREBASE_CONFIG));
+      const mine = db.ref(`${ROOM}/${ME}`);
+      mine.onDisconnect().remove();
+      const room = db.ref(ROOM);
+      const take = snap => {
+        if (snap.key === ME) return;
+        const d = snap.val() || {}, o = others.get(snap.key), now = performance.now() / 1000;
+        if (o) Object.assign(o, { tx: d.x, ty: d.y, tl: d.l || 0, s: d.s || 180, got: now });
+        else others.set(snap.key, { x: d.x, y: d.y, l: 0, tx: d.x, ty: d.y, tl: d.l || 0, s: d.s || 180, got: now });
+      };
+      room.on('child_added', take);
+      room.on('child_changed', take);
+      room.on('child_removed', snap => others.delete(snap.key));
+      addEventListener('pagehide', () => mine.remove().catch(() => {}));
+    } catch (e) { db = null; console.error(e); }
+  }
+  connect();
+
   // ---- Frame
   let last = performance.now() / 1000;
   function frame() {
@@ -445,18 +505,11 @@ This yields:</p>
     const lvl = readLoudness(dt);
     const sx = scrollX, sy = scrollY;
 
-    // light up the cells under the scope
-    if (inside && root.classList.contains('live') && lvl > 0.01) {
-      const half = size / 2, k = 1 - Math.exp(-dt / RISE);
-      const x0 = Math.max(0, Math.floor((px + sx - half) / CELL)), x1 = Math.min(cols - 1, Math.floor((px + sx + half) / CELL));
-      const y0 = Math.max(0, Math.floor((py + sy - half) / CELL)), y1 = Math.min(rows - 1, Math.floor((py + sy + half) / CELL));
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        const i = y * cols + x;
-        let v = val[i] * Math.exp(-(now - at[i]) / FADE);
-        if (lvl > v) v += (lvl - v) * k;
-        val[i] = v; at[i] = now;
-      }
-    }
+    // light up the cells under my scope, then under everyone else's
+    const mine = inside && root.classList.contains('live');
+    if (mine && lvl > 0.01) shine(px + sx, py + sy, size, lvl, now, dt);
+    shareMine(mine ? px + sx : 0, mine ? py + sy : 0, mine ? lvl : 0, now);
+    shineOthers(now, dt);
 
     // paint the darkness for the visible part of the page
     const c0 = Math.floor(sx / CELL), r0 = Math.floor(sy / CELL), d = img.data;
@@ -483,17 +536,8 @@ This yields:</p>
   }
   requestAnimationFrame(frame);
 
-  // ---- Name shown above the scope
-  try { nameInput.value = localStorage.getItem('lantern-name') || ''; } catch {}
-  function applyName() {
-    const name = nameInput.value.trim().slice(0, 10).toUpperCase();
-    callsignEl.textContent = name || 'UNKNOWN';
-    try { localStorage.setItem('lantern-name', name); } catch {}
-  }
-
   // ---- Start
   function go() {
-    applyName();
     intro.hidden = true;
     root.classList.add('live');
   }
@@ -516,7 +560,6 @@ This yields:</p>
     }
   }
   document.getElementById('start').addEventListener('click', startMic);
-  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startMic(); });
   document.getElementById('nomic').addEventListener('click', go);
 })();
 </script>
