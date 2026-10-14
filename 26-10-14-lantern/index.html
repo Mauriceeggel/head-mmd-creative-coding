@@ -7,14 +7,17 @@
 <meta name="description" content="A dark page you light up with your voice: a square scope reveals the text and images under it, as long as you make noise.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap">
 <style>
 /*
   Layers, bottom to top:
   1. #doc     the article, drawn in phosphor green with a glow
   2. #dark    a canvas of black that covers the page; it is cleared where the scope has shone
   3. #scope   the square that follows the pointer
-  4. #hud, #intro
+  4. #intro
+
+  The article is set in a monospace font so that a scrambled word takes exactly
+  the width of the real one, and decoding never moves the layout.
 */
 :root{
   --bg:#000;
@@ -23,24 +26,23 @@
   --phos-faint:#14532b;
   --glow:rgba(77,255,136,.55);
   --glow-soft:rgba(77,255,136,.22);
-  --font-text:"IBM Plex Serif", Georgia, serif;
   --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:var(--bg); color:var(--phos); font-family:var(--font-text); line-height:1.6; overflow-x:hidden}
+body{background:var(--bg); color:var(--phos); font-family:var(--font-mono); line-height:1.65; overflow-x:hidden}
 html.live, html.live *{cursor:none}
 
 /* 1. The article */
-#doc{max-width:900px; margin:0 auto; padding:64px clamp(16px,4vw,40px) 160px; font-size:1.05rem;
+#doc{max-width:900px; margin:0 auto; padding:64px clamp(16px,4vw,40px) 160px; font-size:.95rem;
   text-shadow:0 0 3px var(--glow), 0 0 14px var(--glow-soft)}
 #doc header{border-bottom:1px solid var(--phos-dim); margin-bottom:24px; padding-bottom:8px}
-#doc h1{font-weight:400; font-size:clamp(2.2rem,6vw,3rem); line-height:1.1; margin:0}
+#doc h1{font-weight:500; font-size:clamp(2.2rem,6vw,3rem); line-height:1.1; margin:0}
 .from{font-family:var(--font-mono); font-size:.8rem; color:var(--phos-dim); margin:6px 0 0}
-#doc h2{font-weight:400; font-size:1.7rem; border-bottom:1px solid var(--phos-faint); margin:2.2em 0 .5em; padding-bottom:4px; clear:both}
-#doc h3{font-weight:600; font-size:1.2rem; margin:1.6em 0 .4em}
-#doc h4{font-weight:600; font-size:1.05rem; margin:1.4em 0 .3em}
+#doc h2{font-weight:500; font-size:1.5rem; border-bottom:1px solid var(--phos-faint); margin:2.2em 0 .5em; padding-bottom:4px; clear:both}
+#doc h3{font-weight:600; font-size:1.15rem; margin:1.6em 0 .4em}
+#doc h4{font-weight:600; font-size:1rem; margin:1.4em 0 .3em}
 #doc p{margin:0 0 1em}
 #doc a{color:var(--phos); text-decoration:underline; text-decoration-color:var(--phos-faint); text-underline-offset:3px}
 #doc a:hover{text-decoration-color:var(--phos)}
@@ -50,7 +52,7 @@ html.live, html.live *{cursor:none}
   filter:url(#phosphor) drop-shadow(0 0 6px var(--glow-soft))}
 /* Diagrams are black lines on transparent: invert them so the lines glow */
 #doc figure img[src*=".svg."]{filter:invert(1) url(#phosphor) drop-shadow(0 0 6px var(--glow-soft))}
-#doc figcaption{font-size:.82rem; line-height:1.4; color:var(--phos-dim); margin-top:6px}
+#doc figcaption{font-size:.78rem; line-height:1.4; color:var(--phos-dim); margin-top:6px}
 #doc footer{clear:both; margin-top:64px; padding-top:12px; border-top:1px solid var(--phos-faint); font-family:var(--font-mono); font-size:.78rem; color:var(--phos-dim)}
 @media (max-width:640px){
   #doc figure{float:none; margin:0 0 16px; max-width:100%}
@@ -91,12 +93,7 @@ html.live #scope.on{display:block}
 .meter{display:inline-block; width:64px; height:6px; border:1px solid var(--phos-dim); position:relative}
 .meter i{position:absolute; inset:0; transform-origin:left; transform:scaleX(var(--lvl)); background:var(--phos); box-shadow:0 0 6px var(--glow)}
 
-/* 4. HUD and intro */
-#hud{position:fixed; left:16px; bottom:14px; z-index:30; font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; color:var(--phos-dim);
-  display:flex; gap:14px; align-items:center; text-shadow:0 0 6px var(--glow-soft)}
-#hud a{color:inherit; text-decoration:none; border-bottom:1px solid var(--phos-faint); pointer-events:auto}
-html.live #hud a{cursor:none}
-
+/* 4. Intro */
 #intro{position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; background:transparent}
 #intro[hidden]{display:none}
 .card{max-width:440px; border:1.5px solid var(--phos); padding:28px 28px 24px; background:#000;
@@ -106,6 +103,11 @@ html.live #hud a{cursor:none}
 .card .small{font-size:.78rem; color:var(--phos-dim)}
 .card .small a{color:inherit}
 .card .err{color:#ffb35c; text-shadow:none}
+.callsign{display:grid; gap:6px; margin:16px 0 0}
+.callsign span{font-size:.78rem; color:var(--phos-dim); letter-spacing:.08em; text-transform:uppercase}
+.callsign input{font:inherit; font-size:1rem; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--phos); background:#000;
+  border:1px solid var(--phos-dim); padding:8px 10px; width:100%; max-width:14ch; caret-color:var(--phos)}
+.callsign input:focus-visible{outline:2px solid var(--phos); outline-offset:2px}
 .actions{display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 14px}
 .card button{font:inherit; font-weight:600; letter-spacing:.06em; color:#000; background:var(--phos); border:0; padding:10px 16px; cursor:pointer;
   box-shadow:0 0 16px var(--glow)}
@@ -264,12 +266,7 @@ This yields:</p>
 
 <div id="scope" aria-hidden="true">
   <div class="sweep"></div>
-  <div class="readout"><span id="db">RX --</span><span class="meter"><i></i></span></div>
-</div>
-
-<div id="hud">
-  <a href="../">← Vibe Coding Log</a>
-  <span id="status">LANTERN · standby</span>
+  <div class="readout"><span id="callsign">----</span><span class="meter"><i></i></span></div>
 </div>
 
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -277,6 +274,8 @@ This yields:</p>
     <h2 id="intro-title">Lantern</h2>
     <p>This page is dark. Move the square over it and make noise (speak, hum, clap) to light up what is underneath.</p>
     <p>The louder you are, the brighter it gets. Silence shows nothing. What you have lit fades out once the square moves on.</p>
+    <label class="callsign"><span>Your name on the scope</span>
+      <input id="name" type="text" maxlength="10" autocomplete="nickname" spellcheck="false" placeholder="max 10 letters"></label>
     <p class="err" id="err" hidden></p>
     <div class="actions">
       <button id="start" type="button">Turn on microphone</button>
@@ -290,15 +289,22 @@ This yields:</p>
 <script>
 (() => {
   const CELL = 6;          // px of page per cell of the light map
-  const FADE = 1.6;        // s, time constant of the fade once the scope has moved on
+  const FADE = 0.9;        // s, time constant of the fade once the scope has moved on
   const RISE = 0.12;       // s, how fast a cell catches up with the current loudness
+  const GATE = 16;         // dB above the room's noise floor before any light appears
+  const GATE_MIN = -42;    // dBFS, and never below this, so a quiet room still needs a real sound
+  const RANGE = 26;        // dB above the gate to reach full brightness
+  const DECODE_ON = 0.3;   // a word decodes when the light on it rises above this…
+  const DECODE_OFF = 0.18; // …and scrambles again when it falls below this
+  const GLYPHS = '#%&@$*+=<>/\\|?!0123456789ABCDEFHKMNXZ';
 
   const root = document.documentElement;
+  const doc = document.getElementById('doc');
   const dark = document.getElementById('dark');
   const ctx = dark.getContext('2d');
   const scope = document.getElementById('scope');
-  const dbEl = document.getElementById('db');
-  const statusEl = document.getElementById('status');
+  const callsignEl = document.getElementById('callsign');
+  const nameInput = document.getElementById('name');
   const intro = document.getElementById('intro');
   const errEl = document.getElementById('err');
 
@@ -313,6 +319,72 @@ This yields:</p>
       for (let x = 0; x < Math.min(c, cols); x++) { nv[y * c + x] = val[y * cols + x]; na[y * c + x] = at[y * cols + x]; }
     cols = c; rows = r; val = nv; at = na;
   }
+  function lightAt(px, py, now) {
+    const c = Math.floor(px / CELL), r = Math.floor(py / CELL);
+    if (c < 0 || r < 0 || c >= cols || r >= rows) return 0;
+    const i = r * cols + c;
+    return val[i] > 0 ? val[i] * Math.exp(-(now - at[i]) / FADE) : 0;
+  }
+
+  // ---- Words. Every word of the article becomes a span that shows gibberish of the same length
+  //      until the light on it is strong enough; then its letters resolve one after the other.
+  const words = [];
+  const scramble = n => { let s = ''; for (let i = 0; i < n; i++) s += GLYPHS[(Math.random() * GLYPHS.length) | 0]; return s; };
+  (function wrapWords() {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.trim()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const frag = document.createDocumentFragment();
+      for (const part of node.nodeValue.split(/(\s+)/)) {
+        if (!part) continue;
+        if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(part)); continue; }
+        const el = document.createElement('span');
+        const w = { el, text: part, shown: 0, lit: false, x: 0, y: 0, junk: scramble(part.length) };
+        el.textContent = w.junk;
+        words.push(w);
+        frag.appendChild(el);
+      }
+      node.replaceWith(frag);
+    }
+    doc.setAttribute('aria-label', 'Radar, excerpt of the Wikipedia article. Text is scrambled until lit.');
+  })();
+
+  // word centres in page coordinates, sorted top to bottom so the visible ones are found quickly
+  let byY = [];
+  function placeWords() {
+    const sx = scrollX, sy = scrollY;
+    for (const w of words) {
+      const r = w.el.getBoundingClientRect();
+      w.x = r.left + r.width / 2 + sx; w.y = r.top + r.height / 2 + sy;
+    }
+    byY = words.slice().sort((a, b) => a.y - b.y);
+  }
+  function firstBelow(y) {
+    let lo = 0, hi = byY.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (byY[m].y < y) lo = m + 1; else hi = m; }
+    return lo;
+  }
+  let placeTimer = 0;
+  const placeSoon = () => { clearTimeout(placeTimer); placeTimer = setTimeout(placeWords, 150); };
+
+  function updateWords(now, dt) {
+    const top = scrollY - 40, bottom = scrollY + innerHeight + 40;
+    const flicker = Math.random() < dt * 20; // reshuffle the unresolved letters about 20 times a second
+    for (let k = firstBelow(top); k < byY.length && byY[k].y <= bottom; k++) {
+      const w = byY[k], n = w.text.length;
+      const light = lightAt(w.x, w.y, now);
+      if (!w.lit && light > DECODE_ON) w.lit = true;
+      else if (w.lit && light < DECODE_OFF) w.lit = false;
+      const target = w.lit ? n : 0;
+      if (w.shown === target && !(flicker && w.shown > 0 && w.shown < n)) continue;
+      // a word resolves in about a quarter of a second, whatever its length
+      const step = Math.max(1, n * dt / 0.25);
+      w.shown = w.lit ? Math.min(n, w.shown + step) : Math.max(0, w.shown - step);
+      const s = Math.floor(w.shown);
+      w.el.textContent = s >= n ? w.text : s <= 0 ? w.junk : w.text.slice(0, s) + scramble(n - s);
+    }
+  }
 
   // ---- Darkness canvas: one pixel per cell, stretched by CSS so the browser smooths the edges
   let vc = 0, vr = 0, img = null, size = 180;
@@ -326,20 +398,24 @@ This yields:</p>
     size = Math.round(Math.max(130, Math.min(220, Math.min(innerWidth, innerHeight) * 0.24)));
     scope.style.setProperty('--size', size + 'px');
     fitMap();
+    placeSoon();
   }
   addEventListener('resize', fitView);
-  new ResizeObserver(fitMap).observe(document.body);
+  new ResizeObserver(() => { fitMap(); placeSoon(); }).observe(document.body);
   fitView();
+  // the web font changes line breaks, so measure again once it has arrived
+  document.fonts.ready.then(placeWords);
+  document.fonts.addEventListener('loadingdone', placeSoon);
+  addEventListener('load', placeWords);
 
   // ---- Pointer
   let px = 0, py = 0, inside = false;
   addEventListener('pointermove', e => { px = e.clientX; py = e.clientY; inside = true; });
   addEventListener('pointerdown', e => { px = e.clientX; py = e.clientY; inside = true; });
-  document.addEventListener('pointerleave', () => { inside = false; });
   root.addEventListener('mouseleave', () => { inside = false; });
 
   // ---- Sound level, 0..1
-  let analyser = null, buf = null, noiseFloor = -50, level = 0, space = false, db = -100;
+  let analyser = null, buf = null, noiseFloor = -50, level = 0, space = false;
   addEventListener('keydown', e => { if (e.code === 'Space' && root.classList.contains('live')) { space = true; e.preventDefault(); } });
   addEventListener('keyup', e => { if (e.code === 'Space') space = false; });
 
@@ -349,11 +425,12 @@ This yields:</p>
       analyser.getFloatTimeDomainData(buf);
       let s = 0;
       for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
-      db = 20 * Math.log10(Math.sqrt(s / buf.length) + 1e-9);
+      const db = 20 * Math.log10(Math.sqrt(s / buf.length) + 1e-9);
       // the floor follows quiet moments down at once and creeps up by 1.5 dB/s, so room hum is ignored
       noiseFloor = db < noiseFloor ? db : noiseFloor + 1.5 * dt;
-      noiseFloor = Math.max(-90, Math.min(noiseFloor, -25));
-      target = Math.max(0, Math.min(1, (db - (noiseFloor + 8)) / 30));
+      noiseFloor = Math.max(-90, Math.min(noiseFloor, -30));
+      const gate = Math.max(noiseFloor + GATE, GATE_MIN);
+      target = Math.max(0, Math.min(1, (db - gate) / RANGE));
     }
     if (space) target = Math.max(target, 0.85);
     const k = 1 - Math.exp(-dt / (target > level ? 0.05 : 0.25));
@@ -395,23 +472,32 @@ This yields:</p>
     ctx.putImageData(img, 0, 0);
     dark.style.transform = `translate(${-(sx % CELL)}px, ${-(sy % CELL)}px)`;
 
+    if (byY.length) updateWords(now, dt);
+
     // scope
     scope.classList.toggle('on', inside);
     scope.style.transform = `translate(${px}px, ${py}px)`;
     scope.style.setProperty('--lvl', lvl.toFixed(3));
-    dbEl.textContent = analyser ? `RX ${String(Math.round(Math.max(0, db + 100))).padStart(3, '0')}` : (space ? 'RX MAN' : 'RX ---');
 
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
+  // ---- Name shown above the scope
+  try { nameInput.value = localStorage.getItem('lantern-name') || ''; } catch {}
+  function applyName() {
+    const name = nameInput.value.trim().slice(0, 10).toUpperCase();
+    callsignEl.textContent = name || 'UNKNOWN';
+    try { localStorage.setItem('lantern-name', name); } catch {}
+  }
+
   // ---- Start
-  function go(withMic) {
+  function go() {
+    applyName();
     intro.hidden = true;
     root.classList.add('live');
-    statusEl.textContent = withMic ? 'LANTERN · microphone on · make noise to see' : 'LANTERN · hold Space to see';
   }
-  document.getElementById('start').addEventListener('click', async () => {
+  async function startMic() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
@@ -422,14 +508,16 @@ This yields:</p>
       analyser.fftSize = 1024;
       buf = new Float32Array(analyser.fftSize);
       ac.createMediaStreamSource(stream).connect(analyser);
-      go(true);
+      go();
     } catch (e) {
       errEl.hidden = false;
       errEl.textContent = 'The microphone could not be opened (' + (e && e.name || 'error') +
         '). Allow it in the browser’s address bar and try again, or use the space bar.';
     }
-  });
-  document.getElementById('nomic').addEventListener('click', () => go(false));
+  }
+  document.getElementById('start').addEventListener('click', startMic);
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startMic(); });
+  document.getElementById('nomic').addEventListener('click', go);
 })();
 </script>
 </body>
