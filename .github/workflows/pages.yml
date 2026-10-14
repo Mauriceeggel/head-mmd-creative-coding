@@ -1,4 +1,4 @@
-name: Deploy Soundroom to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
@@ -25,6 +25,6 @@ jobs:
       - uses: actions/configure-pages@v4
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: 26-10-08-soundroom
+          path: .
       - id: deployment
         uses: actions/deploy-pages@v4

@@ -1,5 +1,9 @@
 # Vibe Coding Log
 
+**Live site: [mauriceeggel.github.io/vibe-coding-test](https://mauriceeggel.github.io/vibe-coding-test/)**
+
+- [2026-10-08 · Shared Listening Room](https://mauriceeggel.github.io/vibe-coding-test/26-10-08-soundroom/) ([code](26-10-08-soundroom/))
+
 Small web experiments built by vibe coding, for the course *Creative Coding: Future of Web* (2026–2027).
 
 The site is published with GitHub Pages. The home page (`index.html`) lists every project; each project lives in its own folder.
@@ -18,15 +22,15 @@ The site is published with GitHub Pages. The home page (`index.html`) lists ever
 ├── 26-10-08-soundroom/
 │   └── index.html          Shared Listening Room
 ├── README.md
-├── .nojekyll               serve files as they are, without Jekyll
-└── .gitignore
+└── .github/workflows/
+    └── pages.yml           publishes the whole folder to GitHub Pages
 ```
 
 ## Adding a project
 
 1. Create a folder named `YY-MM-DD-name` with an `index.html` inside.
 2. In the home page `index.html`, copy one `<li>` of the list, put it at the top and change the date, link, title and note.
-3. Add a row to the table above.
+3. Add a line to the list at the top and a row to the table above.
 
 ## Notes
 
