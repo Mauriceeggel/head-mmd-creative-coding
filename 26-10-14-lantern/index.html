@@ -93,7 +93,10 @@ html.live #scope.on{display:block}
 .meter{display:inline-block; width:64px; height:6px; border:1px solid var(--phos-dim); position:relative}
 .meter i{position:absolute; inset:0; transform-origin:left; transform:scaleX(var(--lvl)); background:var(--phos); box-shadow:0 0 6px var(--glow)}
 
-/* 4. Intro */
+/* 4. Online count and intro */
+#online{position:fixed; left:16px; bottom:14px; z-index:30; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--phos-dim); text-shadow:0 0 6px var(--glow-soft); pointer-events:none}
+#online:empty{display:none}
 #intro{position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; background:transparent}
 #intro[hidden]{display:none}
 .card{max-width:440px; border:1.5px solid var(--phos); padding:28px 28px 24px; background:#000;
@@ -263,6 +266,8 @@ This yields:</p>
   <div class="sweep"></div>
   <div class="readout"><span class="meter"><i></i></span></div>
 </div>
+
+<div id="online" aria-live="polite"></div>
 
 <div id="intro" role="dialog" aria-modal="true" aria-label="Lantern">
   <div class="card">
@@ -493,7 +498,20 @@ const FIREBASE_CONFIG = {
       room.on('child_added', take);
       room.on('child_changed', take);
       room.on('child_removed', snap => others.delete(snap.key));
-      addEventListener('pagehide', () => mine.remove().catch(() => {}));
+
+      // everyone with the page open counts as online, scope or not; the entry is put back after a reconnect
+      const onlineEl = document.getElementById('online');
+      const here = db.ref(`lantern-v1/online/${ME}`);
+      db.ref('.info/connected').on('value', snap => {
+        if (!snap.val()) { onlineEl.textContent = 'reconnecting…'; return; }
+        here.onDisconnect().remove();
+        here.set(true).catch(() => {});
+      });
+      db.ref('lantern-v1/online').on('value', snap => {
+        const n = Math.max(1, snap.numChildren());
+        onlineEl.textContent = n === 1 ? '1 person online' : `${n} people online`;
+      });
+      addEventListener('pagehide', () => { mine.remove().catch(() => {}); here.remove().catch(() => {}); });
     } catch (e) { db = null; console.error(e); }
   }
   connect();
