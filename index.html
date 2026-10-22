@@ -121,7 +121,7 @@ body{background:var(--bg); color:var(--ink); font-family:var(--font-mono); font-
   </section>
 
 <script>
-// Folder icons open their window; the window drags by its title bar and closes with the button or Escape.
+// Folder icons open their window; the window drags by its title bar and closes with the button, Escape or a click elsewhere.
 for (const icon of document.querySelectorAll('[data-window]')) {
   const win = document.getElementById(icon.dataset.window);
   const n = win.querySelectorAll('.versions li').length;
@@ -135,6 +135,11 @@ for (const icon of document.querySelectorAll('[data-window]')) {
   });
   win.querySelector('.close').addEventListener('click', close);
   win.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  document.addEventListener('pointerdown', e => {
+    if (win.hidden || win.contains(e.target) || icon.contains(e.target)) return;
+    win.hidden = true;
+    icon.classList.remove('open');
+  });
 
   const bar = win.querySelector('.titlebar');
   bar.addEventListener('pointerdown', e => {
