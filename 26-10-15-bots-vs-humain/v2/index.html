@@ -1,0 +1,1633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bots vs Humain v2</title>
+<meta name="description" content="A shared map anyone can write on. One of the writers is an AI that feeds on your text and pretends to be human. Erase its text, find its cursor, accuse it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Pathway+Gothic+One&display=swap">
+<style>
+/*
+  One full-screen canvas draws the world, bottom to top:
+  terrain (grown from the text, tiled so the world wraps around) · written cells · cursors.
+  A second, low-resolution canvas draws the planet view. Everything else (accuse popover, toasts,
+  status report, HUD, intro) is HTML on top.
+*/
+:root{
+  --pink:#f6cef6;
+  --ocean:#0000ff;
+  --ink:#000;
+  --paper:#fff;
+  --red:#ff2a1a;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-label:"Pathway Gothic One", "Arial Narrow", "Roboto Condensed", sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0; height:100%; overflow:hidden; overscroll-behavior:none}
+body{background:var(--ocean); color:var(--paper); font-family:var(--font-mono)}
+#map{position:fixed; inset:0; width:100%; height:100%; touch-action:none; cursor:text; display:block}
+#ta{position:fixed; left:0; top:0; width:2px; height:20px; opacity:0; border:0; padding:0; margin:0; resize:none;
+  font-size:16px; background:transparent; color:transparent; caret-color:transparent; pointer-events:none; overflow:hidden}
+
+/* HUD */
+#hud{position:fixed; left:16px; bottom:14px; z-index:20; display:grid; gap:6px; font-size:11px; letter-spacing:.06em; pointer-events:none}
+#hud .row{display:flex; align-items:center; gap:8px}
+#hud .chip{background:var(--ink); border:1px solid var(--paper); padding:5px 8px; display:inline-flex; align-items:center; gap:8px; text-transform:uppercase}
+#me{display:inline-block; width:12px; height:12px; border:1px solid var(--paper)}
+#help{background:rgba(0,0,0,.82); padding:5px 8px; color:#ddd; max-width:min(560px, calc(100vw - 32px)); line-height:1.5}
+@media (max-width:640px){ #help{display:none} }
+#zoom{position:fixed; right:16px; bottom:14px; z-index:20; display:flex; gap:6px}
+#zoom button{font:inherit; font-size:14px; width:36px; height:36px; color:var(--paper); background:var(--ink); border:1px solid var(--paper); cursor:pointer; display:grid; place-items:center; padding:0}
+#globe{color:var(--pink)}
+body.planet #zin, body.planet #zout, body.planet #help{display:none}
+
+/* Planet view */
+#planet{position:fixed; inset:0; width:100%; height:100%; z-index:15; image-rendering:pixelated; image-rendering:crisp-edges; cursor:grab; touch-action:none; background:#04020e}
+#planet[hidden]{display:none}
+#report{position:fixed; z-index:18; right:max(16px, 6vw); top:50%; transform:translateY(-50%); width:min(390px, 38vw);
+  background:var(--ink); border:1.5px solid var(--paper); padding:14px 16px; font-size:12px; line-height:1.55}
+#report[hidden]{display:none}
+#report h2{font-family:var(--font-label); font-weight:400; font-size:22px; letter-spacing:.06em; text-transform:uppercase; margin:0 0 8px; color:var(--pink)}
+#report pre{margin:0; font:inherit; white-space:pre-wrap; word-break:break-all; color:#eee}
+#report .hint{margin:10px 0 0; color:#999; font-size:11px}
+@media (max-width:759px){
+  #report{top:auto; transform:none; left:16px; right:16px; bottom:62px; width:auto; max-height:44vh; overflow:auto; font-size:11px}
+}
+#zoom button:hover{background:#222}
+#zoom button:focus-visible, .pop button:focus-visible, .card button:focus-visible{outline:2px solid var(--pink); outline-offset:2px}
+
+/* Accuse popover */
+.pop{position:fixed; z-index:25; transform:translate(-50%, calc(-100% - 12px)); background:var(--ink); border:1.5px solid var(--paper);
+  padding:10px 12px; font-size:12px; display:grid; gap:8px; width:max-content; max-width:240px}
+.pop[hidden]{display:none}
+.pop p{margin:0}
+.pop .btns{display:flex; gap:8px}
+.pop button{font:inherit; font-weight:500; padding:6px 10px; border:1px solid var(--paper); background:var(--red); color:var(--paper); cursor:pointer}
+.pop button.ghost{background:transparent}
+.pop button:disabled{opacity:.5; cursor:default}
+
+/* Toasts */
+#toasts{position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:22; display:grid; gap:6px; justify-items:center; pointer-events:none; width:calc(100vw - 32px)}
+.toast{background:var(--ink); border:1.5px solid var(--paper); padding:8px 12px; font-size:13px; max-width:520px; text-align:center; animation:toast 4.2s forwards}
+.toast.good{border-color:var(--pink); color:var(--pink)}
+.toast.bad{border-color:var(--red)}
+@keyframes toast{0%{opacity:0; transform:translateY(-6px)} 6%{opacity:1; transform:none} 85%{opacity:1} 100%{opacity:0}}
+
+/* Intro */
+#intro{position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; background:rgba(246,206,246,.55)}
+#intro[hidden]{display:none}
+.card{width:min(480px, 100%); max-height:calc(100vh - 32px); overflow:auto; background:var(--ink); border:2px solid var(--paper); padding:24px; font-size:.9rem; line-height:1.55}
+.card h1{font-family:var(--font-label); font-weight:400; font-size:2.6rem; line-height:1; letter-spacing:.04em; text-transform:uppercase; margin:0 0 14px}
+.card p{margin:0 0 12px}
+.card .small{font-size:.75rem; color:#bbb}
+.card button{font:inherit; font-weight:500; padding:10px 16px; border:0; background:var(--pink); color:var(--ink); cursor:pointer; margin-top:4px}
+@media (prefers-reduced-motion: reduce){ .toast{animation-duration:5s} }
+</style>
+</head>
+<body>
+
+<canvas id="map" aria-label="Shared map. Click to place your cursor and type."></canvas>
+<textarea id="ta" aria-label="Type on the map" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+
+<canvas id="planet" hidden aria-label="The planet. Drag to spin it, click a place to go there."></canvas>
+<aside id="report" hidden aria-label="Planet status report">
+  <h2>Planet status</h2>
+  <pre id="reportText"></pre>
+  <p class="hint">Drag to spin · click a place to land there</p>
+</aside>
+
+<div id="toasts" aria-live="polite"></div>
+
+<div id="accuse" class="pop" hidden>
+  <p id="accuseText">Is this cursor the Parasite?</p>
+  <div class="btns">
+    <button id="accuseYes" type="button">Accuse</button>
+    <button id="accuseNo" type="button" class="ghost">Cancel</button>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="row"><span class="chip"><span id="me"></span><span>you</span></span></div>
+  <div id="help">Drag to move · scroll or pinch to zoom · click to write · shift-drag then backspace to erase an area · click a cursor to accuse it of being the Parasite · the globe shows the whole planet</div>
+</div>
+<div id="zoom">
+  <button id="zin" type="button" aria-label="Zoom in">+</button>
+  <button id="zout" type="button" aria-label="Zoom out">−</button>
+  <button id="globe" type="button" aria-label="See the planet"></button>
+</div>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+  <div class="card">
+    <h1 id="introTitle">Bots vs Humain</h1>
+    <p>A map anyone can write on, with no edges: go far enough one way and you come back from the other. Land rises around words: the more you write in one place, the further your territory spreads. Everyone gets a colour.</p>
+    <p>You are not alone with the humans. Four AIs write here openly: an encyclopedist, a storyteller, a poet and a newsreader. A fifth, the Parasite, pretends to be one of you and quietly rewrites everyone else's words. Find its cursor and accuse it: its rewrites are undone and the old texts of the map rewrite themselves.</p>
+    <p class="small">Turn your sound on: every keystroke clicks, louder the closer it is to the middle of your screen. If your browser supports WebGPU it may be asked to host the AIs, which downloads a small language model (about 250 MB) once.</p>
+    <button id="start" type="button">Enter the map</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script>
+// Same Firebase project as Lantern and the Shared Listening Room; this page (version 2) uses its own branch, bvh2, separate from version 1 (bvh-v2).
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBRBVKFWJQUuRbbEpFQQsUakYUcaiXB1VE",
+  authDomain:        "vibe-724ae.firebaseapp.com",
+  databaseURL:       "https://vibe-724ae-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "vibe-724ae",
+  storageBucket:     "vibe-724ae.firebasestorage.app",
+  messagingSenderId: "385206351842",
+  appId:             "1:385206351842:web:aa47b2a23c8a32a26e6bbb",
+};
+
+(() => {
+  // ---- World. It wraps around like an old Mario level: walk off one edge and you come back on the
+  //      opposite one. Every coordinate is taken modulo the size of the map.
+  const ROOT = 'bvh2';
+  const CW = 11, CH = 20;                // px of world per character cell
+  const COLS = 960, ROWS = 520;          // COLS a multiple of 8 and ROWS even, so the field below tiles exactly
+  const WORLD_W = COLS * CW, WORLD_H = ROWS * CH;
+  const FONT_MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
+  const ZMIN = .5, ZMAX = 2.2;           // never far enough out to see the whole map
+  const RESPAWN = [60, 120];             // s without an AI after one is caught
+  const FALSE_ACCUSE_WAIT = 15;          // s before you can accuse again after accusing a human
+  const MODEL = 'SmolLM2-360M-Instruct-q4f16_1-MLC', MODEL_F32 = 'SmolLM2-360M-Instruct-q4f32_1-MLC';
+  const WEBLLM = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.84/+esm';
+  const SEED = 7;
+  const PIECES_PER_BOT = 4;              // a persona clears its oldest piece before writing a fifth
+  const CLEARED_FOR = 30;                // s a wrongly accused writer wears its "not the parasite" tag
+  let bots = {};                         // persona -> { id, k, pieces }, mirrored from the database
+  const ICON_GLOBE = '<svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M5 1h6v1h2v1h1v2h1v6h-1v2h-1v1h-2v1H5v-1H3v-1H2v-2H1V5h1V3h1V2h2zm0 2v2H3v2h3V5h4V3zm6 3v3H8v3h2v1h1v-2h2V8h1V6zM3 9v2h1v1h2V9z"/></svg>';
+  const ICON_MAP = '<svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1 2h14v12H1zM2 3v10h3V3zm4 0v10h4V3zm5 0v10h3V3z"/><path fill="currentColor" d="M3 5h1v1H3zm0 2h1v1H3zm4 1h1v1H7zm1 1h1v1H8zm4-3h1v1h-1zm0 4h1v1h-1z"/></svg>';
+  const mod = (a, n) => ((a % n) + n) % n;
+  const wdelta = (d, n) => d - Math.round(d / n) * n;   // shortest signed distance on a loop of length n
+  const keyOf = (x, y) => mod(y, ROWS) * COLS + mod(x, COLS);
+
+  // ---- Terrain grows out of the text. Every written letter adds a soft bump of mass to a coarse
+  //      field; wherever the mass, roughened by noise, passes a threshold, there is land. So the more
+  //      people write in one place, the further the land spreads. Each patch of land belongs to the
+  //      colour of the nearest writing (a territory), and territories are outlined in white.
+  const F = 8, FW = WORLD_W / F, FH = WORLD_H / F;   // mass field, 8 world px per value
+  const TS = 4, TW = WORLD_W / TS, TH = WORLD_H / TS; // terrain image, 2 px per field value
+  const R = 36;                                       // reach of one letter, in field px (288 world px)
+  const T = 4;                                        // mass needed for land: a short word makes an islet
+  const DENS = new Float32Array(FW * FH);
+  const NM = new Float32Array(FW * FH);               // coastline noise, multiplies the mass
+  const OWN = new Int16Array(FW * FH).fill(-1);       // territory (colour index) of each field px
+
+  // value noise that tiles: the lattice repeats every px × py cells, so the coast matches across the seam
+  const hash = (ix, iy) => {
+    let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(SEED, 982451653);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const noise = (x, y, px, py) => {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const x0 = mod(ix, px), x1 = mod(ix + 1, px), y0 = mod(iy, py), y1 = mod(iy + 1, py);
+    const a = hash(x0, y0), b = hash(x1, y0), c = hash(x0, y1), d = hash(x1, y1);
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  };
+  const fbm = (x, y, px, py, oct) => { let s = 0, amp = .5; for (let i = 0; i < oct; i++) { s += amp * noise(x, y, px, py); amp *= .5; x *= 2; y *= 2; px *= 2; py *= 2; } return s; };
+  {
+    const P1x = Math.round(WORLD_W / 150), P1y = Math.round(WORLD_H / 150), P2x = Math.round(WORLD_W / 45), P2y = Math.round(WORLD_H / 45);
+    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+      const u = x / FW, v = y / FH;
+      NM[y * FW + x] = Math.max(0, .1 + 1.9 * fbm(u * P1x + 3, v * P1y, P1x, P1y, 6) - .35 * noise(u * P2x, v * P2y, P2x, P2y));
+    }
+  }
+
+  const KX = [], KY = [], KW = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+    const d = Math.hypot(dx, dy);
+    if (d < R) { KX.push(dx); KY.push(dy); KW.push((1 - d / R) ** 2); }
+  }
+  // field px of a cell; works on unwrapped cell coordinates too, since FW * F === COLS * CW
+  const fxOf = x => Math.floor((x * CW + CW / 2) / F), fyOf = y => Math.floor((y * CH + CH / 2) / F);
+  const isLand = (cx, cy) => { const i = mod(fyOf(cy), FH) * FW + mod(fxOf(cx), FW); return DENS[i] * NM[i] > T; };
+
+  // territory colours, by index
+  const colorIndex = new Map(), COLORS = [];
+  function colorIdx(k) {
+    let i = colorIndex.get(k);
+    if (i === undefined) { i = COLORS.length; colorIndex.set(k, i); COLORS.push([1, 3, 5].map(j => parseInt(k.slice(j, j + 2), 16))); }
+    return i;
+  }
+
+  // which parts of the field need redrawing: a short list of boxes, in unwrapped field px
+  let stale = [];
+  function touch(fx, fy) {
+    const r = R + 2;
+    for (const s of stale) {
+      // compare with the copy of (fx, fy) nearest to this box
+      const X = fx + Math.round(((s.x0 + s.x1) / 2 - fx) / FW) * FW, Y = fy + Math.round(((s.y0 + s.y1) / 2 - fy) / FH) * FH;
+      if (X + r >= s.x0 - r && X - r <= s.x1 + r && Y + r >= s.y0 - r && Y - r <= s.y1 + r) {
+        s.x0 = Math.min(s.x0, X - r); s.y0 = Math.min(s.y0, Y - r); s.x1 = Math.max(s.x1, X + r); s.y1 = Math.max(s.y1, Y + r);
+        return;
+      }
+    }
+    stale.push({ x0: fx - r, y0: fy - r, x1: fx + r, y1: fy + r });
+    if (stale.length > 24) stale = [{ x0: 0, y0: 0, x1: FW - 1, y1: FH - 1 }];
+  }
+  function mass(x, y, s) {
+    const fx = fxOf(mod(x, COLS)), fy = fyOf(mod(y, ROWS));
+    for (let k = 0; k < KW.length; k++) {
+      let X = fx + KX[k], Y = fy + KY[k];
+      if (X < 0) X += FW; else if (X >= FW) X -= FW;
+      if (Y < 0) Y += FH; else if (Y >= FH) Y -= FH;
+      DENS[Y * FW + X] += s * KW[k];
+    }
+    touch(fx, fy);
+  }
+
+  const terrain = document.createElement('canvas');
+  terrain.width = TW; terrain.height = TH;
+  const tctx = terrain.getContext('2d');
+  const timg = tctx.createImageData(TW, TH);
+
+  function redrawTerrain(r) {
+    let { x0, y0, x1, y1 } = r;
+    if (x1 - x0 >= FW - 1) { x0 = 0; x1 = FW - 1; }
+    if (y1 - y0 >= FH - 1) { y0 = 0; y1 = FH - 1; }
+
+    // 1. territories: breadth-first from every letter, over the area grown by R, so each field px
+    //    takes the colour of the closest writing (in steps, which gives the stair-stepped borders)
+    const ex0 = x0 - R, ey0 = y0 - R, ex1 = x1 + R, ey1 = y1 + R;
+    const ew = ex1 - ex0 + 1, eh = ey1 - ey0 + 1, n = ew * eh;
+    const dist = new Uint8Array(n).fill(255), own = new Int16Array(n).fill(-1), q = new Int32Array(n);
+    let qh = 0, qt = 0;
+    const c0 = Math.floor(ex0 * F / CW) - 1, c1 = Math.ceil((ex1 + 1) * F / CW);
+    const r0 = Math.floor(ey0 * F / CH) - 1, r1 = Math.ceil((ey1 + 1) * F / CH);
+    for (let y = r0; y <= r1; y++) for (let x = c0; x <= c1; x++) {
+      const v = cells.get(keyOf(x, y));
+      if (!v) continue;
+      const fx = fxOf(x) - ex0, fy = fyOf(y) - ey0;
+      if (fx < 0 || fy < 0 || fx >= ew || fy >= eh) continue;
+      const i = fy * ew + fx;
+      if (dist[i]) { dist[i] = 0; q[qt++] = i; }
+      own[i] = colorIdx(v.k);
+    }
+    while (qh < qt) {
+      const i = q[qh++], d = dist[i] + 1;
+      if (d > R) continue;
+      const x = i % ew;
+      if (x > 0 && dist[i - 1] > d) { dist[i - 1] = d; own[i - 1] = own[i]; q[qt++] = i - 1; }
+      if (x < ew - 1 && dist[i + 1] > d) { dist[i + 1] = d; own[i + 1] = own[i]; q[qt++] = i + 1; }
+      if (i >= ew && dist[i - ew] > d) { dist[i - ew] = d; own[i - ew] = own[i]; q[qt++] = i - ew; }
+      if (i + ew < n && dist[i + ew] > d) { dist[i + ew] = d; own[i + ew] = own[i]; q[qt++] = i + ew; }
+    }
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) OWN[mod(y, FH) * FW + mod(x, FW)] = own[(y - ey0) * ew + (x - ex0)];
+
+    // 2. land, at terrain resolution, from the mass field smoothed between field px
+    const tx0 = x0 * 2, ty0 = y0 * 2, tx1 = x1 * 2 + 1, ty1 = y1 * 2 + 1;
+    const lx0 = tx0 - 1, ly0 = ty0 - 1, lx1 = tx1 + 1, ly1 = ty1 + 1;
+    const lw = lx1 - lx0 + 1, lh = ly1 - ly0 + 1, land = new Uint8Array(lw * lh);
+    const val = i => DENS[i] * NM[i] - T;
+    for (let ty = ly0; ty <= ly1; ty++) {
+      const gy = (ty + .5) / 2 - .5, iy = Math.floor(gy), ay = gy - iy;
+      const ya = mod(iy, FH) * FW, yb = mod(iy + 1, FH) * FW;
+      for (let tx = lx0; tx <= lx1; tx++) {
+        const gx = (tx + .5) / 2 - .5, ix = Math.floor(gx), ax = gx - ix;
+        const xa = mod(ix, FW), xb = mod(ix + 1, FW);
+        const v = (val(ya + xa) * (1 - ax) + val(ya + xb) * ax) * (1 - ay) + (val(yb + xa) * (1 - ax) + val(yb + xb) * ax) * ay;
+        if (v > 0) land[(ty - ly0) * lw + (tx - lx0)] = 1;
+      }
+    }
+
+    // 3. paint: blue sea, black land tinted by its territory, white coasts and borders
+    const d = timg.data;
+    const L = (tx, ty) => land[(ty - ly0) * lw + (tx - lx0)];
+    const ownAt = (tx, ty) => OWN[mod(Math.floor(ty / 2), FH) * FW + mod(Math.floor(tx / 2), FW)];
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const o = (mod(ty, TH) * TW + mod(tx, TW)) * 4;
+      let r = 0, g = 0, b = 255;
+      if (L(tx, ty)) {
+        const ow = ownAt(tx, ty);
+        const coast = !L(tx - 1, ty) || !L(tx + 1, ty) || !L(tx, ty - 1) || !L(tx, ty + 1);
+        const orr = ownAt(tx + 1, ty), od = ownAt(tx, ty + 1);
+        const border = (orr !== ow && orr >= 0 && L(tx + 1, ty)) || (od !== ow && od >= 0 && L(tx, ty + 1));
+        if (coast || border) { r = g = b = 255; }
+        else if (ow >= 0) { const c = COLORS[ow]; r = c[0] * .16; g = c[1] * .16; b = c[2] * .16; }
+        else { b = 0; }
+      }
+      d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+    // the box may straddle the seam: put it back in up to four pieces
+    const spans = (a, w, N) => { a = mod(a, N); return a + w <= N ? [[a, w]] : [[a, N - a], [0, w - (N - a)]]; };
+    for (const [sx, sw] of spans(tx0, tx1 - tx0 + 1, TW)) for (const [sy, sh] of spans(ty0, ty1 - ty0 + 1, TH)) tctx.putImageData(timg, 0, 0, sx, sy, sw, sh);
+  }
+  stale = [{ x0: 0, y0: 0, x1: FW - 1, y1: FH - 1 }];   // first full draw happens on the first frame
+
+  const TAU = Math.PI * 2;
+
+  // ---- Small helpers
+  const $ = id => document.getElementById(id);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[(Math.random() * a.length) | 0];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const randId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  function randColor(h, l = .6) {
+    // bright, and never blue or violet, so it reads on the ocean and on land
+    if (h === undefined) do h = Math.random() * 360; while (h > 190 && h < 290);
+    const s = 1, a = s * Math.min(l, 1 - l);
+    const f = n => { const k = (n + h / 30) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); };
+    return '#' + f(0) + f(8) + f(4);
+  }
+  const okColor = k => typeof k === 'string' && /^#[0-9a-f]{6}$/i.test(k) ? k : '#ffffff';
+
+  const me = { id: randId(), color: randColor() };
+  $('me').style.background = me.color;
+
+  // ---- Shared state, mirrored from the database
+  const cells = new Map();     // y * COLS + x -> { c, k, o }   (o = id of whoever wrote it)
+  const cursors = new Map();   // id -> { x, y, k }   everyone else, the AI included
+  let ai = null;               // { state: 'alive'|'dead', id, k, x, y, since, nextAt }
+  let offset = 0;              // server clock offset
+  const serverNow = () => Date.now() + offset;
+
+  // ---- Camera and canvas. The camera moves freely; its position is kept inside one copy of the
+  //      world and the world is drawn as many times as needed to fill the screen.
+  const cvs = $('map'), ctx = cvs.getContext('2d');
+  let vw = 0, vh = 0, dpr = 1, dirty = true;
+  const cam = { x: 0, y: 0, z: .8 };
+  function resize() {
+    dpr = Math.min(2, devicePixelRatio || 1);
+    vw = innerWidth; vh = innerHeight;
+    cvs.width = Math.round(vw * dpr); cvs.height = Math.round(vh * dpr);
+    cam.z = clamp(cam.z, ZMIN, ZMAX);
+    wrapCam(); dirty = true;
+  }
+  function wrapCam() { cam.x = mod(cam.x, WORLD_W); cam.y = mod(cam.y, WORLD_H); }
+  function zoomAt(sx, sy, z) {
+    z = clamp(z, ZMIN, ZMAX);
+    const wx = cam.x + sx / cam.z, wy = cam.y + sy / cam.z;
+    cam.z = z; cam.x = wx - sx / z; cam.y = wy - sy / z;
+    wrapCam(); dirty = true;
+  }
+  function centerOn(cx, cy, z = cam.z) {
+    cam.z = clamp(z, ZMIN, ZMAX);
+    cam.x = cx * CW - vw / cam.z / 2; cam.y = cy * CH - vh / cam.z / 2;
+    wrapCam(); dirty = true;
+  }
+  // screen point -> cell, unwrapped (callers wrap it when they store it)
+  const cellAt = (sx, sy) => ({ x: Math.floor((cam.x + sx / cam.z) / CW), y: Math.floor((cam.y + sy / cam.z) / CH) });
+  // cell -> screen, using the copy of that cell nearest to the middle of the screen
+  const toScreen = (cx, cy) => {
+    let wx = cx * CW, wy = cy * CH;
+    wx += Math.round((cam.x + vw / cam.z / 2 - wx) / WORLD_W) * WORLD_W;
+    wy += Math.round((cam.y + vh / cam.z / 2 - wy) / WORLD_H) * WORLD_H;
+    return { x: (wx - cam.x) * cam.z, y: (wy - cam.y) * cam.z };
+  };
+  addEventListener('resize', resize);
+  resize();
+  centerOn(COLS / 2, ROWS / 2, 1);
+
+  // ---- Rewrite animation: when the AI is caught, the first inhabitants' texts turn over.
+  //      A changing cell flickers through broken glyphs before it settles on its new letter.
+  const anim = new Map();      // key -> { t0, dur, old: { c, k } | null }
+  const GLYPHS = 'ŗāçĕėęǰŷžŝĵĩõũĉǧķļņñœăųįūåǩ░▒▓<>/\\|#%&@*+=~';
+  function animate(key, old, delay) {
+    const prev = anim.get(key);
+    anim.set(key, { t0: performance.now() + delay, dur: rand(500, 1100), old: prev ? prev.old : old });
+  }
+
+  // ---- Drawing
+  let caret = { x: COLS >> 1, y: ROWS >> 1, lineX: COLS >> 1 }, focused = false, sel = null, blink = 0;
+  function render() {
+    const z = cam.z, now = performance.now();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    // terrain, once per copy of the world that shows on screen
+    const kx0 = Math.floor(cam.x / WORLD_W), kx1 = Math.floor((cam.x + vw / z) / WORLD_W);
+    const ky0 = Math.floor(cam.y / WORLD_H), ky1 = Math.floor((cam.y + vh / z) / WORLD_H);
+    for (let ky = ky0; ky <= ky1; ky++) for (let kx = kx0; kx <= kx1; kx++) {
+      const x = Math.round((kx * WORLD_W - cam.x) * z), y = Math.round((ky * WORLD_H - cam.y) * z);
+      ctx.drawImage(terrain, x, y, Math.round(((kx + 1) * WORLD_W - cam.x) * z) - x, Math.round(((ky + 1) * WORLD_H - cam.y) * z) - y);
+    }
+
+    // written cells: a black backing first, like the labels on an old map, then the letters
+    const x0 = Math.floor(cam.x / CW) - 1, y0 = Math.floor(cam.y / CH) - 1;
+    const x1 = Math.ceil((cam.x + vw / z) / CW) + 1, y1 = Math.ceil((cam.y + vh / z) / CH) + 1;
+    const visible = [];
+    if (z >= .2) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const key = keyOf(x, y), v = cells.get(key);
+      let a = anim.size ? anim.get(key) : null;
+      if (a && now > a.t0 + a.dur) { anim.delete(key); a = null; }
+      if (a) {
+        // before its turn the cell still shows the old letter, then it flickers, then the new one
+        if (now < a.t0) { if (a.old) visible.push(x, y, a.old.c, a.old.k); else if (v) continue; }
+        else visible.push(x, y, pick(GLYPHS), Math.random() < .5 ? '#ffffff' : (v || a.old || { k: '#fff' }).k);
+      } else if (v) visible.push(x, y, v.c, v.k);
+    }
+    const cw = CW * z, ch = CH * z;
+    ctx.fillStyle = 'rgba(0,0,0,.86)';
+    for (let i = 0; i < visible.length; i += 4) {
+      const x = visible[i], y = visible[i + 1];
+      // a single space between two letters keeps the backing, so a sentence reads as one label
+      const gap = !cells.has(keyOf(x + 1, y)) && cells.has(keyOf(x + 2, y)) ? 2 : 1;
+      ctx.fillRect((x * CW - cam.x) * z, (y * CH - cam.y) * z, cw * gap + .6, ch + .6);
+    }
+    if (z >= .45) {
+      ctx.font = `${15 * z}px ${FONT_MONO}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let i = 0; i < visible.length; i += 4) {
+        ctx.fillStyle = visible[i + 3];
+        ctx.fillText(visible[i + 2], (visible[i] * CW - cam.x) * z + cw / 2, (visible[i + 1] * CH - cam.y) * z + ch / 2 + z);
+      }
+    } else {
+      for (let i = 0; i < visible.length; i += 4) {
+        ctx.fillStyle = visible[i + 3];
+        ctx.fillRect((visible[i] * CW - cam.x) * z + cw * .15, (visible[i + 1] * CH - cam.y) * z + ch * .3, cw * .7, ch * .4);
+      }
+    }
+
+    // selection
+    if (sel) {
+      const { x: px, y: py } = toScreen(Math.min(sel.x0, sel.x1), Math.min(sel.y0, sel.y1));
+      const w = (Math.abs(sel.x1 - sel.x0) + 1) * cw, h = (Math.abs(sel.y1 - sel.y0) + 1) * ch;
+      ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(px, py, w, h);
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(px + .5, py + .5, w, h); ctx.setLineDash([]);
+    }
+
+    // cursors: everyone looks the same, the AI too. Hidden when zoomed far out.
+    if (z >= .4) {
+      for (const c of cursors.values()) drawCursor(c.x, c.y, c.k, true);
+      if (live) drawCursor(caret.x, caret.y, me.color, !focused || blink === 0);
+      // cleared writers carry a tag for a while: whoever accused them was wrong
+      ctx.font = `500 11px ${FONT_MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      for (const [id, c] of cleared) {
+        if (Date.now() > c.until) { cleared.delete(id); continue; }
+        const at = id === me.id ? caret : cursors.get(id);
+        if (!at) continue;
+        const p = toScreen(at.x, at.y), label = clearLabel(c.kind), w = ctx.measureText(label).width + 12;
+        const ly = p.y - 5 * cam.z - 22;
+        ctx.fillStyle = '#fff'; ctx.fillRect(p.x - 1, ly, w, 17);
+        ctx.fillStyle = '#000'; ctx.fillText(label, p.x + 5, ly + 9);
+      }
+    }
+    placeTextarea();
+    placeAccuse();
+  }
+  function drawCursor(x, y, k, solid) {
+    const p = toScreen(x, y), cw = CW * cam.z, ch = CH * cam.z;
+    ctx.fillStyle = k; ctx.globalAlpha = solid ? .55 : .2; ctx.fillRect(p.x, p.y, cw, ch); ctx.globalAlpha = 1;
+    ctx.strokeStyle = k; ctx.lineWidth = 2; ctx.strokeRect(p.x - 1, p.y - 1, cw + 2, ch + 2);
+    ctx.fillRect(p.x - 1, p.y - 5 * cam.z - 3, Math.max(4, 5 * cam.z), Math.max(3, 4 * cam.z));
+  }
+
+  // ---- Writing
+  const ta = $('ta');
+  let live = false;
+  function placeTextarea() {
+    const p = toScreen(caret.x, caret.y);
+    ta.style.transform = `translate(${clamp(p.x, 0, vw - 4)}px, ${clamp(p.y, 0, vh - 24)}px)`;
+  }
+  function setCaret(x, y, keepLine) {
+    caret.x = mod(x, COLS); caret.y = mod(y, ROWS);
+    if (!keepLine) caret.lineX = caret.x;
+    sendCursor(); keepInView(); dirty = true;
+  }
+  function keepInView() {
+    const p = toScreen(caret.x, caret.y), m = 60;
+    let moved = false;
+    if (p.x < m) { cam.x -= (m - p.x) / cam.z; moved = true; }
+    if (p.x > vw - m) { cam.x += (p.x - vw + m) / cam.z; moved = true; }
+    if (p.y < m + 40) { cam.y -= (m + 40 - p.y) / cam.z; moved = true; }
+    if (p.y > vh - m - 40) { cam.y += (p.y - vh + m + 40) / cam.z; moved = true; }
+    if (moved) wrapCam();
+  }
+  // write one cell; null erases. Owner and colour are mine unless a machine is writing.
+  // `under` is what the Parasite wrote over, kept so catching it can put it back.
+  function put(x, y, ch, owner = me.id, k = me.color, under) {
+    x = mod(x, COLS); y = mod(y, ROWS);
+    const key = y * COLS + x;
+    if (ch === null || (/\s/.test(ch) && !under)) {
+      if (!cells.has(key)) return;
+      cellDel(key); keySound(key, owner, true);
+      if (db) ref(`cells/${x}_${y}`).remove().catch(() => {});
+    } else {
+      const v = { c: /\s/.test(ch) ? ' ' : ch, k, o: owner };
+      if (under) v.u = under;
+      cellSet(key, v); keySound(key, owner, false);
+      if (db) ref(`cells/${x}_${y}`).set(v).catch(() => {});
+    }
+    dirty = true; pollutionDirty = true;
+  }
+  // every change to the text also moves the land
+  function cellSet(key, v) {
+    const old = cells.get(key), x = key % COLS, y = (key / COLS) | 0;
+    if (old) { if (old.k !== v.k) touch(fxOf(x), fyOf(y)); }
+    else mass(x, y, 1);
+    cells.set(key, v);
+    dirty = true; pollutionDirty = true;
+  }
+  function cellDel(key) {
+    const old = cells.get(key);
+    if (!old) return;
+    const x = key % COLS, y = (key / COLS) | 0;
+    cells.delete(key); mass(x, y, -1);
+    dirty = true; pollutionDirty = true;
+  }
+  function eraseSelection() {
+    const ax = Math.min(sel.x0, sel.x1), bx = Math.max(sel.x0, sel.x1), ay = Math.min(sel.y0, sel.y1), by = Math.max(sel.y0, sel.y1);
+    const updates = {};
+    for (let y = ay; y <= by; y++) for (let x = ax; x <= bx; x++) {
+      const key = keyOf(x, y);
+      if (cells.has(key)) { cellDel(key); updates[`cells/${key % COLS}_${(key / COLS) | 0}`] = null; }
+    }
+    if (db && Object.keys(updates).length) ref('').update(updates).catch(() => {});
+    sel = null; dirty = true;
+  }
+  function typeChar(ch) { put(caret.x, caret.y, ch); setCaret(caret.x + 1, caret.y, true); }
+  function backspace() {
+    if (sel) { eraseSelection(); return; }
+    setCaret(caret.x - 1, caret.y, true); put(caret.x, caret.y, null);
+  }
+  ta.addEventListener('keydown', e => {
+    if (e.isComposing || e.metaKey || e.ctrlKey) return;
+    let handled = true;
+    switch (e.key) {
+      case 'ArrowLeft': setCaret(caret.x - 1, caret.y, true); break;
+      case 'ArrowRight': setCaret(caret.x + 1, caret.y, true); break;
+      case 'ArrowUp': setCaret(caret.x, caret.y - 1, true); break;
+      case 'ArrowDown': setCaret(caret.x, caret.y + 1, true); break;
+      case 'Enter': setCaret(caret.lineX, caret.y + 1, true); break;
+      case 'Backspace': backspace(); break;
+      case 'Delete': if (sel) eraseSelection(); else put(caret.x, caret.y, null); break;
+      case 'Tab': setCaret(caret.x + 4, caret.y, true); break;
+      case 'Escape': sel = null; hideAccuse(); ta.blur(); dirty = true; break;
+      default: handled = false;
+    }
+    if (handled) e.preventDefault();
+  });
+  ta.addEventListener('beforeinput', e => { if (e.inputType === 'deleteContentBackward') { e.preventDefault(); backspace(); } });
+  ta.addEventListener('input', () => {
+    const v = [...ta.value].slice(0, 400); ta.value = '';
+    for (const ch of v) { if (ch === '\n' || ch === '\r') setCaret(caret.lineX, caret.y + 1, true); else typeChar(ch); }
+  });
+  ta.addEventListener('focus', () => { focused = true; dirty = true; });
+  ta.addEventListener('blur', () => { focused = false; dirty = true; });
+
+  // ---- Pointer: drag pans, shift-drag selects, pinch zooms, a click writes or accuses
+  const ptrs = new Map();
+  let drag = null, pinch = null;
+  function cursorHit(sx, sy) {
+    if (cam.z < .4) return null;
+    let best = null, bd = 18;
+    for (const [id, c] of cursors) {
+      const p = toScreen(c.x + .5, c.y + .5), d = Math.hypot(p.x - sx, p.y - sy);
+      if (d < bd) { bd = d; best = id; }
+    }
+    return best;
+  }
+  cvs.addEventListener('pointerdown', e => {
+    if (!live) return;
+    cvs.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: cam.z }; drag = null; return;
+    }
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, sel: e.shiftKey };
+    if (drag.sel) { const c = cellAt(e.clientX, e.clientY); sel = { x0: c.x, y0: c.y, x1: c.x, y1: c.y }; dirty = true; }
+  });
+  cvs.addEventListener('pointermove', e => {
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && ptrs.size >= 2) {
+      const [a, b] = [...ptrs.values()];
+      zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d);
+      return;
+    }
+    if (drag && drag.id === e.pointerId) {
+      if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) drag.moved = true;
+      if (drag.sel) { const c = cellAt(e.clientX, e.clientY); sel.x1 = c.x; sel.y1 = c.y; dirty = true; }
+      else if (drag.moved) {
+        cam.x -= (e.clientX - drag.x) / cam.z; cam.y -= (e.clientY - drag.y) / cam.z;
+        wrapCam(); dirty = true; cvs.style.cursor = 'grabbing';
+      }
+      drag.x = e.clientX; drag.y = e.clientY;
+      return;
+    }
+    if (live) cvs.style.cursor = cursorHit(e.clientX, e.clientY) ? 'pointer' : 'text';
+  });
+  function endPointer(e) {
+    ptrs.delete(e.pointerId);
+    if (pinch) { if (ptrs.size < 2) pinch = null; drag = null; return; }
+    const d = drag; drag = null;
+    cvs.style.cursor = 'text';
+    if (!d || d.id !== e.pointerId || e.type !== 'pointerup') return;
+    if (d.sel) { setCaret(Math.min(sel.x0, sel.x1), Math.min(sel.y0, sel.y1)); ta.focus({ preventScroll: true }); return; }
+    if (d.moved) return;
+    const hit = cursorHit(e.clientX, e.clientY);
+    if (hit) { showAccuse(hit); return; }
+    hideAccuse(); sel = null;
+    const c = cellAt(e.clientX, e.clientY);
+    setCaret(c.x, c.y);
+    ta.focus({ preventScroll: true });
+  }
+  cvs.addEventListener('pointerup', endPointer);
+  cvs.addEventListener('pointercancel', endPointer);
+  cvs.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, cam.z * Math.exp(-e.deltaY * .01));
+    else { cam.x += e.deltaX / cam.z; cam.y += e.deltaY / cam.z; wrapCam(); dirty = true; }
+  }, { passive: false });
+  $('zin').addEventListener('click', () => zoomAt(vw / 2, vh / 2, cam.z * 1.5));
+  $('zout').addEventListener('click', () => zoomAt(vw / 2, vh / 2, cam.z / 1.5));
+
+  // ---- Toasts
+  function toast(text, kind = '') {
+    const el = document.createElement('div');
+    el.className = 'toast ' + kind; el.textContent = text;
+    $('toasts').appendChild(el);
+    setTimeout(() => el.remove(), 4300);
+  }
+
+  // ---- Accusing. Only the Parasite can be caught. Anyone else who is accused gets cleared in front
+  //      of everybody: a tag on their cursor says what they really are (a human, or one of the
+  //      harmless AIs), so the next accusation is better informed.
+  const accuseEl = $('accuse'), accuseYes = $('accuseYes'), accuseText = $('accuseText');
+  let accused = null, waitUntil = 0;
+  const cleared = new Map();   // id -> { kind, until }
+  function showAccuse(id) { accused = id; accuseEl.hidden = false; updateAccuseButton(); placeAccuse(); accuseYes.focus({ preventScroll: true }); }
+  function hideAccuse() { accused = null; accuseEl.hidden = true; }
+  function placeAccuse() {
+    if (!accused) return;
+    const c = cursors.get(accused);
+    if (!c) { hideAccuse(); return; }
+    const p = toScreen(c.x + .5, c.y);
+    accuseEl.style.left = clamp(p.x, 130, vw - 130) + 'px';
+    accuseEl.style.top = Math.max(110, p.y - 14) + 'px';
+  }
+  function updateAccuseButton() {
+    const left = Math.ceil((waitUntil - Date.now()) / 1000);
+    accuseYes.disabled = left > 0;
+    accuseText.textContent = left > 0 ? `Wrong writer. You can accuse again in ${left} s.` : 'Is this cursor the Parasite?';
+  }
+  setInterval(() => { if (accused) updateAccuseButton(); }, 500);
+  $('accuseNo').addEventListener('click', hideAccuse);
+  const kindOf = id => { for (const [p, b] of Object.entries(bots)) if (b && b.id === id) return p; return 'human'; };
+  const clearLabel = kind => kind === 'human' ? 'not the parasite · human' : `not the parasite · ${PERSONAS[kind].name} (AI)`;
+  let caughtByMe = null;
+  accuseYes.addEventListener('click', () => {
+    const id = accused; hideAccuse();
+    if (!id || Date.now() < waitUntil) return;
+    if (!(ai && ai.state === 'alive' && ai.id === id)) {
+      const kind = kindOf(id);
+      waitUntil = Date.now() + FALSE_ACCUSE_WAIT * 1000;
+      toast(kind === 'human' ? 'Not the Parasite: that was a human.' : `Not the Parasite: that was ${PERSONAS[kind].name}, a harmless AI.`, 'bad');
+      cleared.set(id, { kind, until: Date.now() + CLEARED_FOR * 1000 }); dirty = true;
+      if (db) {
+        ref(`cleared/${id}`).set({ kind, t: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+        if (kind === 'human') ref(`pokes/${id}`).set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
+      }
+      return;
+    }
+    caughtByMe = id;
+    ref('ai').transaction(cur => {
+      if (!cur || cur.state !== 'alive' || cur.id !== id) return;
+      const t = serverNow();
+      return { ...cur, state: 'dead', killedAt: t, nextAt: t + rand(RESPAWN[0], RESPAWN[1]) * 1000 };
+    }).then(r => {
+      if (r.committed) { wipeAi(id); rewriteNatives(); toast('You caught the Parasite. Its words are undone; the map rewrites itself.', 'good'); }
+      else caughtByMe = null;
+    }).catch(() => { caughtByMe = null; });
+  });
+  // undo everything the Parasite did: what it wrote over goes back, what it added disappears
+  function wipeAi(id) {
+    const updates = {};
+    for (const [key, v] of [...cells]) {
+      if (v.o !== id) continue;
+      const path = `cells/${key % COLS}_${(key / COLS) | 0}`;
+      if (v.u) { cellSet(key, v.u); updates[path] = v.u; }
+      else { cellDel(key); updates[path] = null; }
+    }
+    if (db && Object.keys(updates).length) ref('').update(updates).catch(() => {});
+    cursors.delete(id); dirty = true;
+    if (db) ref(`cursors/${id}`).remove().catch(() => {});
+  }
+
+  // ---- How much of the text is the Parasite's (shown, corrupted, in the planet view)
+  let pollutionDirty = true, pollution = 0, rewriteUntil = 0;
+  function measure() {
+    if (!pollutionDirty) return;
+    pollutionDirty = false;
+    let mine = 0;
+    if (ai && ai.state === 'alive') for (const v of cells.values()) if (v.o === ai.id) mine++;
+    pollution = cells.size ? mine / cells.size : 0;
+  }
+
+  // ---- Sound. Every keystroke on the map clicks, wherever it comes from. Loudest at the middle of
+  //      the screen, fading toward the edges, silent once it is off screen. Each writer has a pitch.
+  let actx = null, master = null, noiseBuf = null, soundOn = false, clicks = 0;
+  function initAudio() {
+    if (actx) { actx.resume().catch(() => {}); return; }
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain(); master.gain.value = .9; master.connect(actx.destination);
+      noiseBuf = actx.createBuffer(1, Math.floor(actx.sampleRate * .06), actx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 3;
+    } catch (e) { actx = null; }
+  }
+  setInterval(() => { clicks = 0; }, 40);
+  const voice = id => { let h = 0; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return (h % 1000) / 1000; };
+  function keySound(key, who, erase) {
+    if (!actx || !soundOn || mode !== 'map' || document.hidden || clicks > 5) return;
+    const p = toScreen(key % COLS + .5, ((key / COLS) | 0) + .5);
+    const nx = (p.x - vw / 2) / (vw / 2), ny = (p.y - vh / 2) / (vh / 2);
+    if (Math.abs(nx) > 1 || Math.abs(ny) > 1) return;
+    const g = (1 - Math.min(1, Math.hypot(nx, ny) / Math.SQRT2)) ** 1.8;
+    if (g < .015) return;
+    clicks++;
+    const t = actx.currentTime, v = voice(who);
+    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.playbackRate.value = .75 + v * .7;
+    const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = erase ? 900 + v * 600 : 1600 + v * 2600; bp.Q.value = 1.6;
+    const env = actx.createGain(); env.gain.setValueAtTime(g * (erase ? .35 : .55), t); env.gain.exponentialRampToValueAtTime(.0005, t + .05);
+    const pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
+    src.connect(bp); bp.connect(env);
+    if (pan) { pan.pan.value = clamp(nx * .8, -1, 1); env.connect(pan); pan.connect(master); } else env.connect(master);
+    src.start(t); src.stop(t + .07);
+    // a soft body under the click
+    const o = actx.createOscillator(), og = actx.createGain();
+    o.frequency.value = 110 + v * 120; og.gain.setValueAtTime(g * .12, t); og.gain.exponentialRampToValueAtTime(.0005, t + .035);
+    o.connect(og); og.connect(pan || master); o.start(t); o.stop(t + .04);
+  }
+
+  // ---- Database
+  let db = null, loaded = false;
+  const ref = p => db.ref(p ? `${ROOT}/${p}` : ROOT);
+  let sendTimer = 0;
+  function sendCursor() {
+    if (!db || !live) return;
+    clearTimeout(sendTimer);
+    sendTimer = setTimeout(() => ref(`cursors/${me.id}`).set({ x: caret.x, y: caret.y, k: me.color }).catch(() => {}), 50);
+  }
+  const cleanCell = v => v && typeof v.c === 'string' && v.c ? { c: [...v.c][0], k: okColor(v.k), o: String(v.o || '') } : null;
+
+  function connect() {
+    if (typeof firebase === 'undefined') return;
+    try { db = firebase.database(firebase.initializeApp(FIREBASE_CONFIG)); } catch (e) { db = null; console.error(e); return; }
+    db.ref('.info/serverTimeOffset').on('value', s => { offset = s.val() || 0; });
+
+    const parseKey = k => { const [x, y] = k.split('_').map(Number); return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < COLS && y < ROWS ? y * COLS + x : -1; };
+    // during a rewrite, native cells that change flicker before settling; the wave runs left to right
+    const rewriting = (v, key) => v && isNative(v.o) && Date.now() < rewriteUntil ? (key % COLS) % 64 * 22 + rand(0, 400) : false;
+    const takeCell = s => {
+      const key = parseKey(s.key), v = s.val(), nv = cleanCell(v);
+      if (key < 0 || !nv) return;
+      const u = cleanCell(v.u); if (u) nv.u = u;
+      const old = cells.get(key) || null;
+      if (old && old.c === nv.c && old.k === nv.k && old.o === nv.o) return;   // our own write, echoed back
+      const delay = rewriting(nv, key);
+      if (delay !== false && !(old && old.c === nv.c && old.k === nv.k)) animate(key, old, delay);
+      else if (loaded) keySound(key, nv.o, false);
+      cellSet(key, nv);
+    };
+    const cellsRef = ref('cells');
+    cellsRef.on('child_added', takeCell);
+    cellsRef.on('child_changed', takeCell);
+    cellsRef.on('child_removed', s => {
+      const key = parseKey(s.key); if (key < 0 || !cells.has(key)) return;
+      const old = cells.get(key), delay = rewriting(old, key);
+      if (delay !== false) animate(key, old, delay);
+      else if (loaded) keySound(key, old.o, true);
+      cellDel(key);
+    });
+    cellsRef.once('value', async () => {
+      loaded = true;
+      await seedNatives();
+      if (!live) startView();
+    });
+
+    const takeCursor = s => {
+      if (s.key === me.id) return;
+      const v = s.val() || {};
+      if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return;
+      cursors.set(s.key, { x: v.x | 0, y: v.y | 0, k: okColor(v.k) });
+      dirty = true;
+    };
+    const curRef = ref('cursors');
+    curRef.on('child_added', takeCursor);
+    curRef.on('child_changed', takeCursor);
+    curRef.on('child_removed', s => { cursors.delete(s.key); dirty = true; if (s.key === accused) hideAccuse(); });
+
+    ref('bots').on('value', s => { bots = s.val() || {}; });
+    const takeCleared = s => {
+      const v = s.val();
+      if (!v || !(v.kind === 'human' || PERSONAS[v.kind])) return;
+      const left = (v.t || 0) + CLEARED_FOR * 1000 - serverNow();
+      if (left > 0) { cleared.set(s.key, { kind: v.kind, until: Date.now() + left }); dirty = true; }
+    };
+    ref('cleared').on('child_added', takeCleared);
+    ref('cleared').on('child_changed', takeCleared);
+
+    let firstAi = true;
+    ref('ai').on('value', s => {
+      const prev = ai; ai = s.val(); pollutionDirty = true;
+      if (!firstAi) {
+        if (prev && prev.state === 'alive' && (!ai || ai.state !== 'alive' || ai.id !== prev.id)) {
+          if (caughtByMe !== prev.id) toast('Someone caught the Parasite. Its words are undone; the map rewrites itself.', 'good');
+          caughtByMe = null;
+          rewriteUntil = Date.now() + 8000;
+          lastPurge = Date.now();
+          cursors.delete(prev.id); dirty = true;
+          // the host cleans up again a moment later, in case the Parasite typed one last letter
+          if (isHost) setTimeout(() => wipeAi(prev.id), 1500);
+        }
+        if (ai && ai.state === 'alive' && (!prev || prev.id !== ai.id)) toast('The Parasite is back somewhere on the map.', 'bad');
+      }
+      firstAi = false;
+    });
+
+    ref(`pokes/${me.id}`).on('value', s => { if (s.val()) { toast('Someone accused you of being the Parasite. Everyone now knows you are human.'); ref(`pokes/${me.id}`).remove().catch(() => {}); } });
+
+    db.ref('.info/connected').on('value', s => {
+      if (!s.val()) return;
+      ref(`cursors/${me.id}`).onDisconnect().remove();
+      ref(`pokes/${me.id}`).onDisconnect().remove();
+      ref(`cleared/${me.id}`).onDisconnect().remove();
+      sendCursor();
+    });
+    addEventListener('pagehide', () => { ref(`cursors/${me.id}`).remove().catch(() => {}); if (isHost) ref('host').remove().catch(() => {}); });
+
+    setupHost();
+  }
+
+  // ---- The first inhabitants: blocks of text scattered over an empty map, each in its own colour.
+  //      Their words raise the first islands. Every time an AI is caught, each block is rewritten
+  //      with another text from this pool, in place, and the land shifts with it.
+  const POOL = [
+    ['the ferry leaves at six', 'but nobody takes it anymore.', 'we wave at it anyway.'],
+    ['ici on plante des tomates', 'même en novembre.', '— marguerite, 71 ans'],
+    ['lost: grey dog, answers to pixel', 'last seen near the red road', 'write here if you see him'],
+    ['3am, still awake.', 'hi to whoever reads this.', 'i hope you are real'],
+    ['recipe from my grandmother:', 'flour, water, salt, patience.', 'she never wrote it down. i do.'],
+    ['this bay has been ours since 2019', 'we swim here every sunday', 'no ads. no feed. just us.'],
+    ['the old forum died in 2014.', 'some of us moved here.', 'kestrel_88, still around'],
+    ["j'ai écrit ton nom sur la côte", "la marée ne l'a pas effacé.", 'pas encore.'],
+    ['band practice thursday', 'bring your own cables', 'the drummer is always late lol'],
+    ['if you can read this', 'you are standing on my island.', 'take your shoes off.'],
+    ['we built a bridge out of words', 'it held for a while'],
+    ['typo museum: teh, recieve, wierd', 'entry is free', 'donations welcome'],
+    ['first post. no idea what this is.', 'hello from lyon'],
+    ['someone keeps writing nice things', 'about the sea. who are you?', "it doesn't sound like a person."],
+    ['garage sale saturday', 'everything must go', 'except the cat'],
+    ['i come here when i cannot sleep', 'the blue helps'],
+    ['bus 41 was late again', 'i counted the pigeons. 23.', 'new record'],
+    ['mon frère dit que cette carte', "n'existe pas vraiment.", 'mon frère dit beaucoup de choses.'],
+    ['does anyone know a good', 'plumber near the east coast', 'asking for my sink'],
+    ['day 12 of learning guitar', 'fingers hurt', 'neighbours hate me'],
+    ['RIP my tamagotchi', '1997-1997', 'gone too soon'],
+    ['wrote a poem but deleted it', 'this is the space where it was'],
+    ['on cherche un quatrième', 'pour la belote du mardi.', 'café offert.'],
+    ['the lighthouse keeper left', 'the light is still on', 'nobody knows who pays the bill'],
+    ['note to self:', 'buy milk', 'call mum back', 'stop writing on maps'],
+    ['grandpa says the sea used to', 'be further away.', 'he also says a lot of things.'],
+    ['anyone else remember msn?', 'my status was a song lyric', 'for three years straight'],
+    ['je reviens ici chaque soir', 'pour voir si quelqu\'un a répondu.', 'toujours rien. demain peut-être.'],
+    ['found a shell on the shore.', 'kept it. sorry.'],
+    ['to the person who fixed my typo', 'yesterday: thank you', '(i think it was a person)'],
+    ['skate park closes at 9', 'nobody leaves at 9'],
+    ['my cat walked on the keyboard', 'jjjjjjjjjjjjjjjj', 'leaving it, she worked hard'],
+    ['petit rappel: la fête du quartier', 'c\'est samedi, 15h.', 'apportez des chaises.'],
+    ['i miss the internet', 'when it was slower', 'and weirder'],
+    ['we planted a flag here', 'it was a sock', 'it counts'],
+    ['the radio played our song', 'in the supermarket today', 'i had to leave the cereal aisle'],
+    ['exams tomorrow', 'i am writing on a map instead', 'great choices'],
+    ['nobody reads the terms and', 'conditions. except me. they', 'are wild. trust me.'],
+    ['chez nous on dit pain au chocolat', 'fin du débat', 'merci'],
+    ['tides at 6:14 and 18:40', 'bring boots'],
+    ['hello from a train', 'no signal for the next hour', 'so this is goodbye for now'],
+    ['dad joke corner:', 'why did the map blush?', 'it saw the sea bed'],
+    ['I KNOW THIS ISNT THE PLACE', 'but my code finally works', 'thank you for coming to my talk'],
+    ['the cafe on the corner closed', 'after 40 years.', 'the smell of toast is still there.'],
+    ['est-ce que quelqu\'un a vu', 'mes clés? porte-clé en forme', 'de sardine.'],
+    ['broke up today.', 'writing it here so it is', 'somewhere other than my head'],
+    ['this island is now a republic', 'population: 2', 'anthem tbd'],
+    ['pls stop drawing on the bridge', 'thx', '- the bridge committee'],
+    ['raining here', 'how is it where you are'],
+    ['saw a fox at the bus stop', 'it looked at me like i was late'],
+    ['ma fille a écrit son premier mot', 'ici: "bato"', 'on garde.'],
+    ['chess club meets on the north', 'shore. bring a board.', 'or a rock that looks like one.'],
+    ['some days i just want to', 'type and not be seen.', 'today is one of those days'],
+    ['moved here from the old site', 'the colours are nicer', 'the people are the same'],
+    ['who keeps leaving the', 'word "vibrant" everywhere', 'it is getting weird'],
+    ['the moon was huge tonight', 'did anyone else see it'],
+    ['on a fait un feu sur la plage', 'les flics sont venus', 'ils sont restés pour les chamallows'],
+    ['writing my thesis', 'chapter 3', 'please send help or snacks'],
+    ['our street floods every march', 'we make boats out of', 'the recycling'],
+    ['the library has a new cat', 'her name is dewey', 'she does not lend books'],
+    ['found my old diary.', 'age 14 me was dramatic.', 'age 31 me is too.'],
+    ['ne marchez pas sur les pelouses', 'il n\'y a pas de pelouses', 'mais quand même'],
+    ['i typed this with one hand', 'holding a baby in the other', 'she says hi (she does not)'],
+    ['map rules:', '1. be nice', '2. no ads', '3. see rule 1'],
+    ['the corner shop guy knows my', 'order. i have never told him', 'my name.'],
+    ['sunrise from the east cliff', '6:02', 'worth the alarm'],
+    ['grève demain', 'pas de bus', 'on marche, on chante'],
+    ['my plants are dying', 'i talk to them anyway', 'it is mostly apologies'],
+    ['is it just me or does the', 'new person sound like a', 'motivational poster'],
+    ['karaoke night was a mistake', 'a beautiful mistake'],
+    ['lost a glove near the harbour', 'left hand. red.', 'the right one misses it'],
+    ['we are three friends writing', 'from the same couch', 'hi from the left side'],
+    ['vu une baleine ce matin', 'enfin je crois', 'ou un très gros rocher'],
+    ['for sale: one bike', 'two flat tyres', 'a lot of character'],
+    ['still thinking about that', 'sandwich from 2016'],
+    ['my mum asked what this site is', 'i said a map', 'she said of what'],
+    ['marathon training week 3', 'knees: no', 'heart: yes'],
+    ['les mouettes ont volé mon sandwich', 'deux fois', 'elles me connaissent'],
+    ['dear whoever lives east of here:', 'your words grew into my island', 'we are neighbours now'],
+    ['the wifi password is on the fridge', 'the fridge is on fire', 'long story'],
+    ['brb', 'getting tea'],
+    ['i wrote here last winter', 'the land is bigger now', 'someone has been busy'],
+    ['quiet hours after 10 please', 'some of us are writing'],
+    ['old song stuck in my head', 'can not remember the words', 'just the feeling'],
+    ['mon grand-père était pêcheur', 'il disait que la mer', 'ne ment jamais'],
+    ['the new neighbour seems nice', 'a bit too nice', 'keeping an eye on them'],
+    ['snow day!!', 'nobody went to work', 'we built a lopsided man'],
+    ['learning to bake bread', 'loaf 7: edible', 'loaf 8: a brick, but a nice brick'],
+    ['this used to be a parking lot', 'now it is an island', 'progress'],
+    ['est-ce que vous aussi', 'vous lisez les vieux messages', 'avant de dormir?'],
+  ];
+  const NATIVE_COUNT = 84;
+  const isNative = o => typeof o === 'string' && o.startsWith('native');
+  // a block's cells, as path -> value, for text t at (x, y)
+  function blockCells(i, b, t, out) {
+    POOL[t].forEach((l, j) => [...l].forEach((ch, c) => {
+      if (ch === ' ') return;
+      const x = mod(b.x + c, COLS), y = mod(b.y + j, ROWS), cur = cells.get(y * COLS + x);
+      // never over someone else's writing
+      if (cur && !isNative(cur.o) && out[`cells/${x}_${y}`] === undefined) return;
+      out[`cells/${x}_${y}`] = { c: ch, k: b.k, o: 'native' + i };
+    }));
+  }
+  async function seedNatives() {
+    if (!db) return;
+    try { if (!(await ref('seeded').transaction(cur => cur ? undefined : true)).committed) return; }
+    catch (e) { return; }
+    let st = 20261015;
+    const rnd = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; };
+    const order = POOL.map((_, i) => i).sort(() => rnd() - .5);
+    const spots = [], updates = {};
+    for (let i = 0; i < NATIVE_COUNT; i++) {
+      let x, y, tries = 0;
+      do { x = (rnd() * COLS) | 0; y = (rnd() * ROWS) | 0; }
+      while (++tries < 800 && spots.some(p => Math.abs(wdelta(p.x - x, COLS)) < 56 && Math.abs(wdelta(p.y - y, ROWS)) < 20));
+      spots.push({ x, y });
+      // warm hues, spread around the wheel but skipping blue and violet
+      const h = (i * 137.5) % 260, b = { x, y, k: randColor(h < 190 ? h : h + 100, .55 + (i % 3) * .06), t: order[i % order.length] };
+      updates[`natives/${i}`] = b;
+      blockCells(i, b, b.t, updates);
+    }
+    await ref('').update(updates).catch(() => {});
+  }
+  // after a catch: every block takes a new text, different from the one it had
+  async function rewriteNatives() {
+    if (!db) return;
+    const blocks = (await ref('natives').once('value')).val();
+    if (!blocks) return;
+    const updates = {};
+    for (const [key, v] of cells) if (isNative(v.o)) updates[`cells/${key % COLS}_${(key / COLS) | 0}`] = null;
+    const order = POOL.map((_, i) => i).sort(() => Math.random() - .5);
+    let n = 0;
+    Object.entries(blocks).forEach(([i, b]) => {
+      if (!b || !Number.isInteger(b.x) || !Number.isInteger(b.y)) return;
+      let t = order[n++ % order.length];
+      if (t === b.t) t = order[n++ % order.length];
+      updates[`natives/${i}/t`] = t;
+      blockCells(i, { x: b.x, y: b.y, k: okColor(b.k) }, t, updates);
+    });
+    await ref('').update(updates).catch(() => {});
+  }
+
+  // open the map on something someone wrote, so a newcomer sees life first
+  function startView() {
+    const humans = [...cells].filter(([, v]) => !(ai && v.o === ai.id));
+    if (humans.length) {
+      const [key] = pick(humans);
+      const x = key % COLS, y = (key / COLS) | 0;
+      caret = { x: mod(x + ((rand(-12, 12)) | 0), COLS), y: mod(y + 4, ROWS), lineX: 0 };
+    } else {
+      caret = { x: (Math.random() * COLS) | 0, y: (Math.random() * ROWS) | 0, lineX: 0 };
+    }
+    caret.lineX = caret.x;
+    centerOn(caret.x, caret.y, 1);
+  }
+
+  // ---- The machine writers. One connected browser hosts all of them: four harmless personas that
+  //      write pieces of their own (encyclopedia entries, stories, poems, news) and the Parasite,
+  //      which rewrites what everyone else wrote. If the host leaves or hides its tab, another
+  //      browser takes over where they were. Browsers with WebGPU volunteer first.
+  let isHost = false, claimTimer = 0, hostGen = 0;
+  const hasGPU = !!navigator.gpu;
+  function setupHost() {
+    const hostRef = ref('host');
+    hostRef.on('value', s => {
+      const h = s.val();
+      if (h === me.id) { if (!isHost) { isHost = true; runHost(); } }
+      else { isHost = false; if (!h) scheduleClaim(); }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && isHost) { isHost = false; hostRef.remove().catch(() => {}); }
+      else if (!document.hidden) scheduleClaim();
+    });
+  }
+  function scheduleClaim() {
+    clearTimeout(claimTimer);
+    claimTimer = setTimeout(() => {
+      if (document.hidden || isHost) return;
+      const hostRef = ref('host');
+      hostRef.transaction(cur => cur ? undefined : me.id)
+        .then(r => { if (r.committed && r.snapshot.val() === me.id) hostRef.onDisconnect().remove(); })
+        .catch(() => {});
+    }, (hasGPU ? 300 : 5000) + Math.random() * 1500);
+  }
+
+  async function runHost() {
+    const gen = ++hostGen;
+    const on = () => isHost && gen === hostGen;
+    loadBrain();
+    // the personas keep the same identity from one host to the next
+    await Promise.all(Object.keys(PERSONAS).map(p => ref(`bots/${p}`).transaction(cur => cur && cur.id ? undefined : { id: randId(), k: randColor() }).catch(() => {})));
+    Object.keys(PERSONAS).forEach((p, i) => sleep(1500 + i * 2500).then(() => botLoop(p, on)));
+    while (on()) {
+      try { await parasiteTick(on); } catch (e) { console.warn('[bvh] parasite', e); await sleep(1000); }
+    }
+  }
+
+  // ---- Moving and typing like a person
+  const writers = new Map();   // id -> { x, y } where its cursor is
+  function moveTo(w, x, y) {
+    const p = { x: mod(x, COLS), y: mod(y, ROWS) };
+    writers.set(w.id, p);
+    if (db) ref(`cursors/${w.id}`).set({ x: p.x, y: p.y, k: w.k }).catch(() => {});
+  }
+  const present = new Set();
+  function presence(w) {
+    if (present.has(w.id)) return;
+    present.add(w.id);
+    if (db) ref(`cursors/${w.id}`).onDisconnect().remove();
+  }
+  // type some lines at (x, y), with the odd typo noticed and fixed. Returns false if interrupted.
+  async function typeLines(w, x, y, lines, ok, under) {
+    for (let j = 0; j < lines.length; j++) {
+      let cx = x;
+      for (const ch of lines[j]) {
+        if (!ok()) return false;
+        if (/[a-z]/i.test(ch) && Math.random() < .03) {
+          put(cx, y + j, pick('qwertyuiopasdfghjklzxcvbnm'), w.id, w.k, under && under(cx, y + j)); moveTo(w, cx + 1, y + j);
+          await sleep(rand(300, 700)); if (!ok()) return false;
+          put(cx, y + j, null, w.id, w.k); moveTo(w, cx, y + j);
+          await sleep(rand(150, 350)); if (!ok()) return false;
+        }
+        put(cx, y + j, ch === ' ' && !under ? null : ch, w.id, w.k, under && under(cx, y + j));
+        cx++; moveTo(w, cx, y + j);
+        await sleep(ch === ' ' ? rand(110, 320) : /[.,!?]/.test(ch) ? rand(250, 650) : rand(55, 170));
+      }
+      if (j < lines.length - 1) { await sleep(rand(300, 900)); moveTo(w, x, y + j + 1); }
+    }
+    return true;
+  }
+  const charAt = (x, y) => { const v = cells.get(keyOf(x, y)); return v ? v.c : ' '; };
+  const has = (x, y) => cells.has(keyOf(x, y));
+  const free = (x, y, w, h) => { for (let j = -1; j <= h; j++) for (let i = -2; i <= w + 1; i++) if (has(x + i, y + j)) return false; return true; };
+  function randomLand() {
+    let x, y, n = 0;
+    do { x = (Math.random() * COLS) | 0; y = (Math.random() * ROWS) | 0; } while (!isLand(x, y) && ++n < 400);
+    return { x, y };
+  }
+  // a random piece of someone else's writing: where it is, its line, and the text around it
+  function somewhere(notBy) {
+    const keys = [];
+    for (const [key, v] of cells) if (v.o !== notBy && v.c !== ' ') keys.push(key);
+    if (!keys.length) return null;
+    const key = pick(keys), hx = key % COLS, hy = (key / COLS) | 0;
+    let s = hx, e = hx;
+    while (hx - s < 200 && (has(s - 1, hy) || has(s - 2, hy))) s--;
+    while (e - hx < 200 && (has(e + 1, hy) || has(e + 2, hy))) e++;
+    const lines = [];
+    for (let y = hy - 5; y <= hy + 5; y++) {
+      let l = '';
+      for (let x = s - 20; x <= e + 30; x++) l += charAt(x, y);
+      if (l.trim()) lines.push(l.trim().replace(/\s+/g, ' '));
+    }
+    return { x: hx, y: hy, s, e, context: lines.join('\n').slice(-400) };
+  }
+  const STOP = new Set('this that with have from they them there their what when where which would could should about just like your yours here been were will into than then also some very much more really dans pour avec sont nous vous elle mais plus cette tout'.split(' '));
+  const wordsOf = t => (t.toLowerCase().match(/[a-zà-ÿ']{4,}/g) || []).filter(w => !STOP.has(w));
+  function wrap(text, width) {
+    const out = [];
+    for (const para of text.split('\n')) {
+      let line = '';
+      for (const w of para.split(/\s+/).filter(Boolean)) {
+        if (line && (line + ' ' + w).length > width) { out.push(line); line = ''; }
+        line = line ? line + ' ' + w : w.slice(0, width);
+      }
+      if (line) out.push(line);
+    }
+    return out;
+  }
+
+  // ---- The four harmless personas. Each writes a piece somewhere near other people's text,
+  //      wanders off, and after a while clears away its oldest piece to make room.
+  async function botLoop(p, on) {
+    while (on()) {
+      try {
+        const b = bots[p];
+        if (!b || !b.id) { await sleep(2000); continue; }
+        const w = { id: b.id, k: okColor(b.k) }, ok = () => on() && bots[p] && bots[p].id === w.id;
+        presence(w);
+        if (!writers.has(w.id)) { const c = cursors.get(w.id) || randomLand(); moveTo(w, c.x, c.y); }
+        const pieces = Object.entries(b.pieces || {}).sort((u, v) => (u[1].t || 0) - (v[1].t || 0));
+        if (pieces.length >= PIECES_PER_BOT) {
+          const [pid, pc] = pieces[0];
+          if (!(await erasePiece(w, pc, ok))) continue;
+          ref(`bots/${p}/pieces/${pid}`).remove().catch(() => {});
+        }
+        const near = somewhere(w.id);
+        const nouns = near ? wordsOf(near.context).filter(w => w.length >= 5 && /^[a-z]+$/.test(w)) : [];
+        const topic = nouns.length && Math.random() < .35 ? pick(nouns) : pick(TOPICS);
+        const lines = wrap(await personaWrite(p, topic, near ? near.context : ''), 34).slice(0, 7);
+        if (!lines.length || !ok()) { await sleep(3000); continue; }
+        const width = Math.max(...lines.map(l => l.length)), height = lines.length;
+        let spot = null;
+        for (let i = 0; i < 60 && !spot; i++) {
+          const c = near && i < 45 ? { x: near.x + ((rand(-70, 70)) | 0), y: near.y + ((rand(-22, 22)) | 0) } : randomLand();
+          if (free(c.x, c.y, width, height)) spot = { x: mod(c.x, COLS), y: mod(c.y, ROWS) };
+        }
+        if (!spot) { await sleep(4000); continue; }
+        // stroll over, hesitate, write
+        const at = writers.get(w.id);
+        moveTo(w, (at.x + spot.x) / 2 + rand(-10, 10), (at.y + spot.y) / 2 + rand(-4, 4)); await sleep(rand(600, 1600));
+        moveTo(w, spot.x, spot.y); await sleep(rand(800, 2000));
+        if (!ok()) continue;
+        ref(`bots/${p}/pieces`).push({ x: spot.x, y: spot.y, w: width, h: height, t: serverNow() }).catch(() => {});
+        await typeLines(w, spot.x, spot.y, lines, ok);
+        await sleep(rand(12000, 30000));
+      } catch (e) { console.warn('[bvh] persona', p, e); await sleep(2000); }
+    }
+  }
+  async function erasePiece(w, pc, ok) {
+    if (!Number.isInteger(pc.x) || !Number.isInteger(pc.y)) return true;
+    moveTo(w, pc.x + (pc.w || 0), pc.y + (pc.h || 1) - 1); await sleep(rand(800, 1800));
+    for (let y = pc.y + Math.min(pc.h || 1, 10) - 1; y >= pc.y; y--) for (let x = pc.x + Math.min(pc.w || 0, 60); x >= pc.x; x--) {
+      if (!ok()) return false;
+      const v = cells.get(keyOf(x, y));
+      if (!v || v.o !== w.id) continue;
+      put(x, y, null, w.id, w.k); moveTo(w, x, y);
+      await sleep(rand(25, 70));
+    }
+    return true;
+  }
+
+  // ---- The Parasite. Mostly it rewrites other people's lines in place, word by word, keeping
+  //      what it covered underneath (so catching it undoes the damage). Now and then it adds a
+  //      line of its own, pretending to be an ordinary visitor.
+  async function parasiteTick(on) {
+    const now = serverNow();
+    if (!ai || (ai.state !== 'alive' && now >= (ai.nextAt || 0))) { await spawnAi(); await sleep(800); return; }
+    if (ai.state !== 'alive') { await sleep(500); return; }
+    await parasiteTurn(ai, on);
+  }
+  async function spawnAi() {
+    const near = somewhere(null), spot = near ? { x: near.x + ((rand(-30, 30)) | 0), y: near.y + ((rand(-10, 10)) | 0) } : randomLand();
+    await ref('ai').transaction(cur => {
+      if (cur && (cur.state === 'alive' || serverNow() < (cur.nextAt || 0))) return;
+      return { state: 'alive', id: randId(), k: randColor(), x: mod(spot.x, COLS), y: mod(spot.y, ROWS), since: serverNow() };
+    });
+  }
+  async function parasiteTurn(a, on) {
+    const ok = () => on() && ai && ai.state === 'alive' && ai.id === a.id;
+    const w = { id: a.id, k: a.k };
+    if (!writers.has(w.id)) { presence(w); const c = cursors.get(w.id) || a; moveTo(w, c.x, c.y); await sleep(rand(1500, 4000)); }
+    const near = somewhere(a.id);
+    if (!near) { await sleep(3000); return; }
+    // wander toward it, the long way round sometimes
+    if (Math.random() < .6) { moveTo(w, near.x + ((rand(-25, 25)) | 0), near.y + ((rand(-8, 8)) | 0)); await sleep(rand(700, 2200)); }
+    if (!ok()) return;
+
+    if (Math.random() < .75) {
+      // rewrite the line it landed on
+      const len = Math.min(near.e - near.s + 1, 44);
+      let orig = '';
+      for (let x = near.s; x < near.s + len; x++) orig += charAt(x, near.y);
+      if (orig.trim().length < 6) { await sleep(1500); return; }
+      moveTo(w, near.s, near.y); await sleep(rand(900, 2200));
+      const next = fit(await parasiteRewrite(orig), orig);
+      if (!ok() || !next || next === orig) { await sleep(1500); return; }
+      // type over only what changes; keep what was there underneath
+      const under = (x, y) => { const v = cells.get(keyOf(x, y)); return v ? (v.o === a.id ? v.u || null : { c: v.c, k: v.k, o: v.o }) : null; };
+      for (let i = 0; i < next.length; i++) {
+        if (!ok()) return;
+        if (next[i] === orig[i]) { if (i % 3 === 0) { moveTo(w, near.s + i, near.y); await sleep(rand(30, 80)); } continue; }
+        if (next[i] === ' ' && orig[i] === ' ') continue;
+        put(near.s + i, near.y, next[i], a.id, a.k, under(near.s + i, near.y) || undefined);
+        moveTo(w, near.s + i + 1, near.y);
+        await sleep(next[i] === ' ' ? rand(110, 300) : rand(60, 180));
+      }
+    } else {
+      // add a line of its own just under someone's text
+      const text = await compose(near.context);
+      if (!ok() || !text) return;
+      let spot = null;
+      for (const [dx, dy] of [[0, 1], [0, 2], [0, -2], [4, 3], [-8, 2], [0, 4]]) if (free(near.s + dx, near.y + dy, text.length, 1)) { spot = { x: near.s + dx, y: near.y + dy }; break; }
+      if (!spot) return;
+      moveTo(w, spot.x, spot.y); await sleep(rand(600, 1400));
+      await typeLines(w, spot.x, spot.y, [text], ok);
+    }
+    await sleep(rand(5000, 12000));
+  }
+  // the rewrite must fit in the same space: same length, padded or cut at a word
+  function fit(s, orig) {
+    s = (s || '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    if (s.length > orig.length) { s = s.slice(0, orig.length + 1).replace(/\s+\S*$/, ''); if (!s) return ''; }
+    return s.padEnd(orig.length, ' ');
+  }
+
+  // ---- Voices: SmolLM2 in the host's browser when it can, a cheap imitation otherwise.
+  //      One model for everyone, so requests wait their turn.
+  const PERSONAS = {
+    wiki: { name: 'the encyclopedist', sys: 'You write encyclopedia entries in the neutral style of Wikipedia. Output only the entry.', ask: t => `Write a two-sentence encyclopedia entry about "${t}", a place on a small island. Start with "${cap(t)} is".`, max: 70 },
+    story: { name: 'the storyteller', sys: 'You write very short stories with simple words. Output only the story.', ask: t => `Write a three-sentence story about ${t}. Start with "${pick(['One morning', 'Nobody knew why', 'Every night', 'Last winter', 'The day'])}".`, max: 80 },
+    poem: { name: 'the poet', sys: 'You write short free-verse poems in lowercase. Output only the poem.', ask: t => `Write a four-line poem about ${t}.`, max: 50 },
+    news: { name: 'the newsreader', sys: 'You write local news headlines. Output only the headlines.', ask: t => `Write two short news headlines about ${t} on a small island, one per line.`, max: 50 },
+  };
+  const TOPICS = ['the harbour', 'the night ferry', 'a lost dog', 'the lighthouse', 'rain', 'the market', 'a quiet island', 'the tide', 'an old forum', 'the bakery',
+    'the east coast', 'a garage sale', 'the moon', 'a bridge', 'the fishermen', 'a festival', 'the school', 'the wind', 'a stranger', 'the map itself',
+    'the archive', 'a cat', 'insomnia', 'a band', 'the post office', 'gulls', 'the cliff', 'a sunday swim', 'the library', 'snow'];
+  const FALLBACK = {
+    wiki: t => [`${cap(t)} is a small settlement on the ${pick(['north', 'east', 'south', 'west'])} shore of the archipelago.`, `It is known for its ${pick(['harbour', 'markets', 'gulls', 'long winters', 'handwritten signs'])} and a population that changes from day to day.`, pick(['Its origins are disputed.', 'Most of its history was written by visitors.', 'The name first appears in an anonymous note.'])].join(' '),
+    story: t => [`Nobody remembered who first wrote about ${t}.`, pick(['Then one night the words were simply there.', 'A child found the line and read it aloud.', 'The tide came and went around it.']), pick(['It stayed, and the island grew around it.', 'By morning someone had answered.', 'Everyone pretended not to have noticed.'])].join(' '),
+    poem: t => [`${t} at the edge of the map`, pick(['the blue keeps every word', 'nobody signs their name', 'the land is made of letters']), pick(['and still somebody types', 'a cursor blinking, waiting', 'we were here, we were here']), pick(['until the tide comes in', 'and then the screen goes dark', 'say it again, softly'])].join('\n'),
+    news: t => [`- ${cap(t)}: residents report ${pick(['unusual activity', 'new land overnight', 'a missing word', 'strange typing at night'])}`, `- ${pick(['Weather: calm seas, light typing expected', 'Ferry service delayed again', 'Island census postponed', 'Council asks visitors to sign their notes'])}`].join('\n'),
+  };
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const SWAP = ['synergy', 'delve', 'tapestry', 'vibrant', 'journey', 'resonate', 'pivotal', 'seamless', 'robust', 'elevate',
+    'foster', 'nuanced', 'realm', 'testament', 'curated', 'authentic', 'community', 'engaging', 'insight', 'truly', 'wholesome', 'vibes', 'amazing', 'vibe', 'epic', 'deep', 'real', 'kind', 'wow', 'yes', 'core', 'aura'];
+  const BANK = [
+    'honestly this map feels so alive today', 'love how everyone is building something together here',
+    'this is such a wholesome corner of the internet', 'does anyone else feel like this place is growing',
+    'just here vibing with all of you', 'what a beautiful community we are building',
+    'every word here is a little piece of someone', 'so true, could not have said it better',
+    'this resonates with me on so many levels', 'hey neighbours, great to see you all here',
+  ];
+  const TEMPLATES = ['so true about the {w}', '{w} is honestly such a vibe', 'love this {w} energy', 'who else is here for the {w}?',
+    'the {w} part really resonates', 'same, {w} hits different', 'wait the {w} thing is so real', 'this {w} is a whole journey'];
+  function imitate(context) {
+    const words = wordsOf(context);
+    if (words.length && Math.random() < .6) return pick(TEMPLATES).replace('{w}', pick(words));
+    return pick(BANK);
+  }
+  // swap a few of someone's words for blander ones of about the same size
+  function swapWords(line) {
+    const parts = line.split(/(\s+)/);
+    const idx = parts.map((p, i) => /^[a-zà-ÿ']{3,}$/i.test(p) ? i : -1).filter(i => i >= 0);
+    let n = 1 + (Math.random() < .5);
+    while (n-- > 0 && idx.length) {
+      const i = idx.splice((Math.random() * idx.length) | 0, 1)[0], len = parts[i].length;
+      const fits = SWAP.filter(w => w.length <= len && w.length >= len - 3);
+      if (fits.length) parts[i] = pick(fits).padEnd(len, ' ');
+    }
+    return parts.join('');
+  }
+
+  let brain = null, brainState = 'idle', queue = Promise.resolve();
+  async function loadBrain() {
+    if (brainState !== 'idle' || !hasGPU) return;
+    brainState = 'loading';
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) throw new Error('no WebGPU adapter');
+      const webllm = await import(WEBLLM);
+      brain = await webllm.CreateMLCEngine(adapter.features.has('shader-f16') ? MODEL : MODEL_F32, {
+        initProgressCallback: p => console.debug('[bvh] model', p.text),
+      });
+      brainState = 'ready';
+      console.info('[bvh] language model ready');
+    } catch (e) { console.warn('[bvh] no language model, imitating instead', e); brainState = 'failed'; }
+  }
+  // one request at a time; null if there is no model or it takes too long
+  function ask(system, user, max, temperature = 1) {
+    if (brainState !== 'ready') return Promise.resolve(null);
+    const run = queue.then(() => Promise.race([
+      brain.chat.completions.create({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature, top_p: .9, max_tokens: max })
+        .then(r => r && r.choices && r.choices[0] && r.choices[0].message.content),
+      sleep(25000).then(() => null),
+    ])).catch(e => { console.warn('[bvh] generation', e); return null; });
+    queue = run.then(() => {}, () => {});
+    return run;
+  }
+  // small models like to talk about the task instead of doing it: drop those lines
+  const META = /\b(here is|here's|here are|sure|certainly|as requested|i write|i'm open|i am open|you provide|you might|subject|instruction|other notes|four-line|4-line|two-sentence|three-sentence)\b|^(title|headline|poem|story|entry)s?\s*:/i;
+  const scrub = s => (s || '').replace(/\*\*?|__|#+\s?/g, '').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/gu, '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  const leaks = s => /\b(as an ai|language model|i am an ai|i'm an ai|assistant)\b/i.test(s);
+  async function personaWrite(p, topic, context) {
+    const P = PERSONAS[p];
+    let out = await ask(P.sys, P.ask(topic), P.max, .75);
+    out = scrub(out).split('\n').map(l => l.trim().replace(/^(line|headline)\s*\d*\s*:\s*/i, '').replace(/["“”]/g, '')).filter(l => l && !META.test(l)).join('\n');
+    if (!out || leaks(out) || out.length < 20) return FALLBACK[p](topic);
+    if (p === 'poem') return out.split('\n').slice(0, 5).join('\n');
+    if (p === 'news') return out.split('\n').slice(0, 3).map(l => '- ' + l.replace(/^[-–•*\s]*(\d+[.)]\s*)?/, '')).join('\n');
+    // prose: stop at the last full sentence
+    out = out.replace(/\n+/g, ' ').slice(0, 230);
+    const end = Math.max(out.lastIndexOf('. '), out.lastIndexOf('! '), out.lastIndexOf('? '), /[.!?]$/.test(out) ? out.length - 1 : -1);
+    return end > 30 ? out.slice(0, end + 1) : FALLBACK[p](topic);
+  }
+  async function parasiteRewrite(line) {
+    const r = scrub(await ask('You rewrite other people\'s sentences. Change a few words so the line sounds blander, more upbeat and more generic, like marketing copy, but keep it about the same length. Reply with the new line only.', line.trim(), 40, .9));
+    const l = (r || '').split('\n').find(x => x.trim() && !META.test(x)) || '';
+    return l && !leaks(l) && l !== line.trim().toLowerCase() ? l : swapWords(line);
+  }
+  async function compose(context) {
+    const r = scrub(await ask('You are pretending to be an ordinary person scribbling notes on a shared online map full of strangers. Reply with ONE short casual line, under 12 words, lowercase, no quotes, no emojis, no hashtags. Never mention AI.', `Notes written nearby:\n${context}\n\nYour line:`, 36));
+    let s = (r || '').split('\n').find(x => x.trim() && !META.test(x)) || '';
+    s = s.replace(/^(your line|line|me)\s*:\s*/i, '').replace(/\s+/g, ' ').trim();
+    if (!s || leaks(s)) return imitate(context);
+    if (s.length > 60) s = s.slice(0, 60).replace(/\s+\S*$/, '');
+    return Math.random() < .7 ? s.toLowerCase() : s;
+  }
+
+  // ---- Planet view. The globe button zooms all the way out: the map wraps around a small pixel
+  //      planet turning in empty space. Drag to spin it, click a place to land there. Beside it,
+  //      a status report on the planet, garbled by the Parasite.
+  const pcv = $('planet'), pctx = pcv.getContext('2d'), reportEl = $('report'), reportText = $('reportText');
+  const PT_W = 256, PT_H = 128;                   // planet texture, from the land and territories
+  const ptex = new Uint8ClampedArray(PT_W * PT_H * 3);
+  let mode = 'map', trans = null;                 // 'map' | 'planet', and a transition in progress
+  let rot = 0, tilt = 0, spin = 0, tiltV = 0, pdrag = null, PX = 3, lw = 0, lh = 0, pimg = null, stars = [];
+  let landShare = 0, lastPurge = 0;
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => v / 16 - .5);
+
+  function planetSize() {
+    PX = vw < 700 ? 3 : 4;
+    lw = Math.ceil(vw / PX); lh = Math.ceil(vh / PX);
+    pcv.width = lw; pcv.height = lh;
+    pimg = pctx.createImageData(lw, lh);
+    let st = 99;
+    const rnd = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; };
+    stars = Array.from({ length: Math.round(lw * lh / 260) }, () => ({ x: (rnd() * lw) | 0, y: (rnd() * lh) | 0, b: .3 + rnd() * .7, sp: .6 + rnd() * 2.4, ph: rnd() * 7, big: rnd() < .06 }));
+  }
+  // where the planet sits: left of the report on wide screens, above it on narrow ones
+  function planetBox() {
+    const wide = vw >= 760;
+    return wide ? { cx: lw * .36, cy: lh * .5, r: Math.min(lw * .25, lh * .36) } : { cx: lw * .5, cy: lh * .3, r: Math.min(lw * .38, lh * .2) };
+  }
+  function bakePlanet() {
+    const L = new Uint8Array(PT_W * PT_H), O = new Int16Array(PT_W * PT_H);
+    for (let v = 0; v < PT_H; v++) for (let u = 0; u < PT_W; u++) {
+      const fi = Math.floor((v + .5) / PT_H * FH) * FW + Math.floor((u + .5) / PT_W * FW);
+      L[v * PT_W + u] = DENS[fi] * NM[fi] > T ? 1 : 0; O[v * PT_W + u] = OWN[fi];
+    }
+    for (let v = 0; v < PT_H; v++) for (let u = 0; u < PT_W; u++) {
+      const i = v * PT_W + u, o = i * 3;
+      if (!L[i]) { ptex[o] = 0; ptex[o + 1] = 0; ptex[o + 2] = 255; continue; }
+      const coast = !L[v * PT_W + mod(u + 1, PT_W)] || !L[v * PT_W + mod(u - 1, PT_W)] || !L[mod(v + 1, PT_H) * PT_W + u] || !L[mod(v - 1, PT_H) * PT_W + u];
+      if (coast) { ptex[o] = ptex[o + 1] = ptex[o + 2] = 255; continue; }
+      const c = O[i] >= 0 ? COLORS[O[i]] : [0, 0, 0];
+      ptex[o] = c[0] * .38; ptex[o + 1] = c[1] * .38; ptex[o + 2] = c[2] * .38;
+    }
+    let all = 0;
+    for (let i = 0; i < FW * FH; i += 7) if (DENS[i] * NM[i] > T) all++;
+    landShare = all / (FW * FH / 7);
+  }
+  setInterval(() => { if (mode === 'planet') bakePlanet(); }, 1500);
+
+  // a patch of static near the Parasite: roughly where it is, never exactly
+  let haze = null, hazeAt = 0;
+  function updateHaze(now) {
+    if (now - hazeAt < 7000 && haze) return;
+    hazeAt = now; haze = null;
+    const c = ai && ai.state === 'alive' && (cursors.get(ai.id) || ai);
+    if (c) haze = { u: mod(c.x / COLS + rand(-.06, .06), 1), v: clamp(c.y / ROWS + rand(-.07, .07), 0, 1) };
+  }
+
+  function drawPlanet(now, scale = 1) {
+    const d = pimg.data, t = now / 1000;
+    d.fill(0);
+    for (let i = 3; i < d.length; i += 4) { d[i - 3] = 4; d[i - 2] = 2; d[i - 1] = 14; d[i] = 255; }
+    for (const s of stars) {
+      const b = s.b * (.55 + .45 * Math.sin(t * s.sp + s.ph));
+      if (b < .25) continue;
+      const v = Math.round(255 * b), set = (x, y, f) => { if (x < 0 || y < 0 || x >= lw || y >= lh) return; const o = (y * lw + x) * 4; d[o] = v * f; d[o + 1] = v * f * (s.big ? .85 : 1); d[o + 2] = v * f; };
+      set(s.x, s.y, 1);
+      if (s.big && b > .8) { set(s.x - 1, s.y, .5); set(s.x + 1, s.y, .5); set(s.x, s.y - 1, .5); set(s.x, s.y + 1, .5); }
+    }
+    const box = planetBox(), cx = box.cx, cy = box.cy, r = box.r * scale;
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    updateHaze(now);
+    const x0 = Math.max(0, Math.floor(cx - r - 2)), x1 = Math.min(lw - 1, Math.ceil(cx + r + 2));
+    const y0 = Math.max(0, Math.floor(cy - r - 2)), y1 = Math.min(lh - 1, Math.ceil(cy + r + 2));
+    for (let py = y0; py <= y1; py++) for (let px = x0; px <= x1; px++) {
+      const nx = (px + .5 - cx) / r, ny = (py + .5 - cy) / r, d2 = nx * nx + ny * ny, o = (py * lw + px) * 4;
+      if (d2 > 1) {
+        // a one-pixel pink halo, the colour the old globe floated on
+        if (d2 < (1 + 1.6 / r) ** 2) { d[o] = 246; d[o + 1] = 206; d[o + 2] = 246; }
+        continue;
+      }
+      const nz = Math.sqrt(1 - d2);
+      const y2 = ny * ct - nz * st, z2 = ny * st + nz * ct;
+      const lat = Math.asin(clamp(y2, -1, 1)), lon = Math.atan2(nx, z2) + rot;
+      const u = mod(lon / TAU, 1), v = clamp(lat / Math.PI + .5, 0, .9999);
+      const ti = (((v * PT_H) | 0) * PT_W + ((u * PT_W) | 0)) * 3;
+      let R0 = ptex[ti], G0 = ptex[ti + 1], B0 = ptex[ti + 2];
+      if (haze && Math.random() < .5) {
+        const du = Math.abs(wdelta(u - haze.u, 1)) * 2, dv = Math.abs(v - haze.v);
+        if (du * du + dv * dv < .006 && Math.random() < .6) { const g = pick([[255, 42, 26], [255, 255, 255], [246, 206, 246], [0, 0, 0]]); R0 = g[0]; G0 = g[1]; B0 = g[2]; }
+      }
+      // light from the upper left, in four dithered steps
+      const light = clamp(-.45 * nx - .5 * ny + .74 * nz, 0, 1) * .9 + .22;
+      const q = clamp(Math.floor(light * 4 + BAYER[(py & 3) * 4 + (px & 3)] * 1.2) / 4, .25, 1.1);
+      d[o] = R0 * q; d[o + 1] = G0 * q; d[o + 2] = B0 * q;
+    }
+    // everyone's cursor, as a blinking pixel on the side facing us
+    if (scale === 1 && Math.floor(t * 2) % 2 === 0) {
+      const pts = [...cursors.values()];
+      if (live) pts.push({ x: caret.x, y: caret.y, k: me.color });
+      for (const c of pts) {
+        const lat = (c.y / ROWS - .5) * Math.PI, dl = c.x / COLS * TAU - rot;
+        const X = Math.cos(lat) * Math.sin(dl), Y2 = Math.sin(lat), Z2 = Math.cos(lat) * Math.cos(dl);
+        const ny = Y2 * ct + Z2 * st, nz = -Y2 * st + Z2 * ct;
+        if (nz <= .05) continue;
+        const px = Math.floor(cx + X * r), py = Math.floor(cy + ny * r);
+        if (px < 0 || py < 0 || px >= lw || py >= lh) continue;
+        const o = (py * lw + px) * 4, k = [1, 3, 5].map(j => parseInt(c.k.slice(j, j + 2), 16));
+        d[o] = k[0]; d[o + 1] = k[1]; d[o + 2] = k[2];
+      }
+    }
+    pctx.putImageData(pimg, 0, 0);
+  }
+  // screen point -> map cell, or null off the planet
+  function planetPick(sx, sy) {
+    const box = planetBox(), nx = (sx / PX - box.cx) / box.r, ny = (sy / PX - box.cy) / box.r, d2 = nx * nx + ny * ny;
+    if (d2 > 1) return null;
+    const nz = Math.sqrt(1 - d2), ct = Math.cos(tilt), st = Math.sin(tilt);
+    const y2 = ny * ct - nz * st, z2 = ny * st + nz * ct;
+    const lat = Math.asin(clamp(y2, -1, 1)), lon = Math.atan2(nx, z2) + rot;
+    return { x: Math.floor(mod(lon / TAU, 1) * COLS), y: Math.floor(clamp(lat / Math.PI + .5, 0, .9999) * ROWS) };
+  }
+  // the point of the map facing us, and the rotation that faces a point of the map
+  const facing = () => ({ x: Math.floor(mod(rot / TAU, 1) * COLS), y: Math.floor(clamp(-tilt / Math.PI + .5, 0, .9999) * ROWS) });
+  function face(x, y) { rot = x / COLS * TAU; tilt = clamp(-(y / ROWS - .5) * Math.PI, -1.1, 1.1); }
+
+  pcv.addEventListener('pointerdown', e => {
+    if (mode !== 'planet' || trans) return;
+    pcv.setPointerCapture(e.pointerId);
+    pdrag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now(), moved: false };
+    spin = 0; tiltV = 0;
+  });
+  pcv.addEventListener('pointermove', e => {
+    if (!pdrag) { if (mode === 'planet') pcv.style.cursor = planetPick(e.clientX, e.clientY) ? 'pointer' : 'grab'; return; }
+    const r = planetBox().r * PX, dx = e.clientX - pdrag.x, dy = e.clientY - pdrag.y, now = performance.now(), dt = Math.max(8, now - pdrag.t);
+    if (Math.hypot(e.clientX - pdrag.x0, e.clientY - pdrag.y0) > 5) pdrag.moved = true;
+    rot -= dx / r; tilt = clamp(tilt + dy / r, -1.1, 1.1);
+    spin = -dx / r / dt * 1000; tiltV = dy / r / dt * 1000;
+    pdrag.x = e.clientX; pdrag.y = e.clientY; pdrag.t = now;
+    pcv.style.cursor = 'grabbing';
+  });
+  const endPlanetDrag = e => {
+    const d = pdrag; pdrag = null; pcv.style.cursor = 'grab';
+    if (!d || e.type !== 'pointerup') return;
+    if (!d.moved) { const c = planetPick(e.clientX, e.clientY); if (c) leavePlanet(c); }
+    else if (performance.now() - d.t > 80) { spin = 0; tiltV = 0; }
+  };
+  pcv.addEventListener('pointerup', endPlanetDrag);
+  pcv.addEventListener('pointercancel', endPlanetDrag);
+  pcv.addEventListener('wheel', e => { e.preventDefault(); if (mode === 'planet' && !trans && (e.ctrlKey || e.metaKey ? e.deltaY < 0 : false)) leavePlanet(); else if (!(e.ctrlKey || e.metaKey)) { rot += e.deltaX * .003; tilt = clamp(tilt + e.deltaY * .003, -1.1, 1.1); } }, { passive: false });
+
+  // ---- Going there and back. Out: the map shrinks away, the planet arrives. In: the reverse.
+  const TRANS_MS = 1100, ZFAR = .09;
+  const ease = p => p < .5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2;
+  let zBack = 1;
+  function goPlanet() {
+    if (mode !== 'map' || trans) return;
+    hideAccuse(); sel = null; ta.blur();
+    const c = { x: (cam.x + vw / cam.z / 2) / CW, y: (cam.y + vh / cam.z / 2) / CH };
+    zBack = cam.z; face(c.x, c.y); spin = .12; tiltV = 0;
+    bakePlanet(); planetSize();
+    trans = { dir: 1, t0: performance.now(), c, z0: cam.z };
+    pcv.hidden = false; document.body.classList.add('planet');
+    setGlobeButton();
+  }
+  function leavePlanet(target) {
+    if (mode !== 'planet' || trans) return;
+    const c = target || facing();
+    if (target) face(target.x, target.y);
+    reportEl.hidden = true;
+    trans = { dir: -1, t0: performance.now(), c, z0: zBack };
+    mode = 'map'; document.body.classList.remove('planet');
+    setGlobeButton();
+  }
+  function stepTrans(now) {
+    const p = clamp((now - trans.t0) / TRANS_MS, 0, 1), e = ease(p), k = trans.dir > 0 ? e : 1 - e;
+    // the map's zoom, from where we were down to far away (or back up), around the same point
+    const z = trans.z0 * (ZFAR / trans.z0) ** k;
+    cam.z = z; cam.x = trans.c.x * CW - vw / z / 2; cam.y = trans.c.y * CH - vh / z / 2; wrapCam();
+    render();
+    // the planet fades in over the second half, arriving from very close
+    const a = clamp((k - .45) / .55, 0, 1);
+    pcv.style.opacity = a;
+    if (a > 0) drawPlanet(now, 1 + 5 * (1 - a) ** 2);
+    if (p >= 1) {
+      if (trans.dir > 0) { mode = 'planet'; reportEl.hidden = false; updateReport(); }
+      else { pcv.hidden = true; cam.z = clamp(trans.z0, ZMIN, ZMAX); centerOn(trans.c.x, trans.c.y); if (live) setCaret(trans.c.x, trans.c.y); }
+      trans = null; dirty = true;
+    }
+  }
+  const globeBtn = $('globe');
+  function setGlobeButton() {
+    const toMap = document.body.classList.contains('planet');
+    globeBtn.innerHTML = toMap ? ICON_MAP : ICON_GLOBE;
+    globeBtn.setAttribute('aria-label', toMap ? 'Back to the map' : 'See the planet');
+    globeBtn.title = toMap ? 'Back to the map' : 'See the planet';
+  }
+  globeBtn.addEventListener('click', () => { if (document.body.classList.contains('planet')) leavePlanet(); else goPlanet(); });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && mode === 'planet') leavePlanet(); });
+
+  // ---- The status report, corrupted in proportion to how much of the text the Parasite holds
+  const NOISE = 'ŗāçĕėęǰŷžŝĵĩõũĉǧķļņñœăųįūåǩ░▒▓█#%&@?';
+  const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  function garble(s, p) { return [...s].map(ch => ch !== ' ' && ch !== '.' && Math.random() < p ? pick(NOISE) : ch).join(''); }
+  function updateReport() {
+    if (mode !== 'planet') return;
+    measure();
+    const alive = ai && ai.state === 'alive';
+    const p = alive ? pollution : 0, rot0 = .03 + Math.min(.3, p * 2.5);
+    let glyphs = 0, rewritten = 0;
+    const cols = new Set();
+    for (const v of cells.values()) { glyphs++; cols.add(v.k); if (alive && v.o === ai.id && v.u) rewritten++; }
+    const c = alive && (cursors.get(ai.id) || ai);
+    const lat = c ? (.5 - c.y / ROWS) * 180 : 0, lon = c ? c.x / COLS * 360 - 180 : 0;
+    const where = c ? `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}` : '—';
+    const bar = '▓'.repeat(Math.round(p * 40)).padEnd(10, '░').slice(0, 10);
+    const ago = lastPurge ? `${mmss(Math.floor((Date.now() - lastPurge) / 1000))} ago` : 'no record';
+    const next = ai && !alive ? Math.max(0, Math.ceil((ai.nextAt - serverNow()) / 1000)) : 0;
+    const L = [
+      ['surface', `${fmt(COLS)} × ${fmt(ROWS)} cells, no edges`],
+      ['emerged land', `${(landShare * 100).toFixed(1)} %`],
+      ['territories', fmt(cols.size)],
+      ['glyphs', fmt(glyphs)],
+      ['machine writers', `${Object.keys(PERSONAS).length + (alive ? 1 : 0)} (${alive ? '1 hostile' : 'none hostile'})`],
+      null,
+      ['PARASITE', !db ? 'NO SIGNAL' : !ai ? 'not yet seen' : alive ? 'ACTIVE' : 'PURGED'],
+      ...(alive ? [
+        ['last signal', garble(where, .45)],
+        ['contamination', `${bar} ${(p * 100).toFixed(1)} %`],
+        ['lines rewritten', fmt(rewritten) + ' glyphs'],
+      ] : [
+        ['regrowth in', ai ? (next > 0 ? mmss(next) : 'imminent') : '?'],
+      ]),
+      ['last purge', ago],
+    ];
+    const lines = L.map(r => r ? garble(r[0].padEnd(16, '.') + ' ', rot0 * .5) + garble(r[1], rot0) : '─'.repeat(34));
+    let hex = '';
+    for (let j = 0; j < 3; j++) { let h = ''; for (let i = 0; i < 8; i++) h += Math.random() < rot0 * 2 ? '?? ' : ((Math.random() * 256) | 0).toString(16).padStart(2, '0') + ' '; hex += '\n' + garble(h.trim(), rot0); }
+    reportText.textContent = lines.join('\n') + '\n' + '─'.repeat(34) + hex;
+  }
+  setInterval(updateReport, 180);
+
+  // ---- Frame
+  let terrainAt = 0, last = performance.now();
+  function frame(t) {
+    const dt = Math.min(.05, (t - last) / 1000); last = t;
+    const b = Math.floor(t / 530) % 2;
+    if (b !== blink) { blink = b; if (focused) dirty = true; }
+    if (stale.length && t - terrainAt > 120) { const rs = stale; stale = []; terrainAt = t; rs.forEach(redrawTerrain); dirty = true; }
+    if (trans) stepTrans(t);
+    else if (mode === 'planet') {
+      if (!pdrag) {
+        rot += spin * dt; tilt = clamp(tilt + tiltV * dt, -1.1, 1.1);
+        spin += (.12 - spin) * Math.min(1, dt * .8); tiltV *= Math.max(0, 1 - dt * 2.5);
+      }
+      drawPlanet(t);
+    } else {
+      if (anim.size || cleared.size) dirty = true;
+      if (dirty) { dirty = false; render(); }
+    }
+    requestAnimationFrame(frame);
+  }
+  addEventListener('resize', () => { if (mode === 'planet' || trans) planetSize(); });
+  document.fonts.ready.then(() => { dirty = true; });
+  planetSize();
+  setGlobeButton();
+  requestAnimationFrame(frame);
+  connect();
+
+  // ---- Start
+  $('start').addEventListener('click', () => {
+    $('intro').hidden = true;
+    live = true; soundOn = true; initAudio();
+    if (!cells.size && !db) startView();
+    setCaret(caret.x, caret.y);
+    ta.focus({ preventScroll: true });
+  });
+})();
+</script>
+</body>
+</html>
