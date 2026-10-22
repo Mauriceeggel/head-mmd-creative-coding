@@ -1,4 +1,4 @@
-# Vibe Coding Log
+# Creative Coding
 
 **Live site: [mauriceeggel.github.io/vibe-coding-test](https://mauriceeggel.github.io/vibe-coding-test/)**
 
