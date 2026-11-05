@@ -13,6 +13,7 @@ The site is published with GitHub Pages. The home page (`index.html`) lists ever
 | Date | Project | Folder |
 | --- | --- | --- |
 | 2026-11-05 | Flux World | [`26-11-05-Flux-World/`](26-11-05-Flux-World/) |
+| 2026-11-05 | Funkor Test | [`26-11-05-Flux-World/`](/26-11-05-Funkor-test/) |
 
 ## test
 
