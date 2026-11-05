@@ -32,4 +32,21 @@ From there, we began exploring different ideas:
 
 <hr>
 
-## 
+## Idea 01 - Sound Room
+
+[Sound Room](https://mauriceeggel.github.io/head-mmd-creative-coding/26-10-08-soundroom/)
+
+![sound room](/process/img/07.png)
+
+## Idea 02 - Lantern
+
+[Lantern](https://mauriceeggel.github.io/head-mmd-creative-coding/26-10-14-lantern/)
+
+![sound room](/process/img/08.png)
+
+## Idea 03 - Map
+
+[Map](https://mauriceeggel.github.io/head-mmd-creative-coding/26-10-15-bots-vs-humain/)
+
+![sound room](/process/img/09.png)
+![sound room](/process/img/10.png)
