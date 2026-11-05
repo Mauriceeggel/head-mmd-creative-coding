@@ -64,63 +64,64 @@ body{background:var(--bg); color:var(--ink); font-family:var(--font-mono); font-
   <!--
     To add a project:
     1. Create a folder named YY-MM-DD-name with an index.html inside.
-    2. Copy one <li> below, put it at the top of the list and change the link, title and icon.
-    To add a version of Bots vs Humain: add an <li> at the top of the window's .versions list below.
+    2. Copy the Flux World <li> below, put it at the top of the list and change the link, title and icon.
+    Older experiments live in test/ and are listed in the "test" window below.
   -->
   <ul class="desktop">
     <li>
-      <button class="icon" type="button" data-window="bots-vs-humain" title="A shared map anyone can write on, with an AI hiding among the writers.">
+      <a class="icon" href="26-11-05-Flux-World/" title="Flux World">
+        <svg viewBox="0 0 56 56" aria-hidden="true">
+          <rect x="4" y="4" width="48" height="48" rx="6" fill="#0c1a1a" stroke="#2f6b66"/>
+          <path d="M10 22c6-6 12 6 18 0s12 6 18 0" fill="none" stroke="#5fe0c8" stroke-width="2" stroke-linecap="round"/>
+          <path d="M10 30c6-6 12 6 18 0s12 6 18 0" fill="none" stroke="#5fe0c8" stroke-width="2" stroke-linecap="round" opacity=".7"/>
+          <path d="M10 38c6-6 12 6 18 0s12 6 18 0" fill="none" stroke="#5fe0c8" stroke-width="2" stroke-linecap="round" opacity=".4"/>
+        </svg>
+        <span class="label">Flux World</span>
+      </a>
+    </li>
+    <li>
+      <button class="icon" type="button" data-window="test" title="Earlier experiments.">
         <svg viewBox="0 0 56 56" aria-hidden="true">
           <path d="M4 14a3 3 0 0 1 3-3h14l5 5h23a3 3 0 0 1 3 3v26a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#3a6fe0"/>
           <path d="M4 21h48v24a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#5b8cf5"/>
-          <rect x="18" y="27" width="20" height="14" rx="3" fill="none" stroke="#fff" stroke-width="2"/>
-          <circle cx="24" cy="34" r="2" fill="#fff"/><circle cx="32" cy="34" r="2" fill="#fff"/>
-          <path d="M28 27v-3" stroke="#fff" stroke-width="2"/>
         </svg>
-        <span class="label">Bots vs Humain</span>
+        <span class="label">test</span>
       </button>
-    </li>
-    <li>
-      <a class="icon" href="26-10-14-lantern/" title="A dark page lit by your voice.">
-        <svg viewBox="0 0 56 56" aria-hidden="true">
-          <rect x="4" y="4" width="48" height="48" rx="6" fill="#111" stroke="#444"/>
-          <rect x="16" y="16" width="24" height="24" fill="none" stroke="#e9b75a" stroke-width="2"/>
-          <path d="M20 28h4l2-5 4 10 2-5h4" fill="none" stroke="#e9b75a" stroke-width="2" stroke-linejoin="round"/>
-        </svg>
-        <span class="label">Lantern</span>
-      </a>
-    </li>
-    <li>
-      <a class="icon" href="26-10-08-soundroom/" title="Co-presence through sound: each visitor holds a note.">
-        <svg viewBox="0 0 56 56" aria-hidden="true">
-          <rect x="4" y="4" width="48" height="48" rx="6" fill="#1b1430" stroke="#4a3a78"/>
-          <circle cx="28" cy="28" r="4" fill="#c7a8ff"/>
-          <circle cx="28" cy="28" r="11" fill="none" stroke="#c7a8ff" stroke-width="2" opacity=".7"/>
-          <circle cx="28" cy="28" r="18" fill="none" stroke="#c7a8ff" stroke-width="2" opacity=".35"/>
-        </svg>
-        <span class="label">Shared Listening Room</span>
-      </a>
     </li>
   </ul>
 
-  <section class="window" id="bots-vs-humain" role="dialog" aria-labelledby="bots-vs-humain-title" hidden>
+  <section class="window" id="test" role="dialog" aria-labelledby="test-title" hidden>
     <div class="titlebar">
       <button class="close" type="button" aria-label="Close"></button>
-      <span class="title" id="bots-vs-humain-title">Bots vs Humain</span>
+      <span class="title" id="test-title">test</span>
     </div>
     <ul class="versions">
       <li>
-        <a href="26-10-15-bots-vs-humain/v2/">
+        <a href="test/26-10-15-bots-vs-humain/v2/">
           <span class="v">v2</span>
-          <span>Work in progress</span>
+          <span>Bots vs Humain</span>
           <span class="date">2026-10-22</span>
         </a>
       </li>
       <li>
-        <a href="26-10-15-bots-vs-humain/">
+        <a href="test/26-10-15-bots-vs-humain/">
           <span class="v">v1</span>
-          <span>Planet, personas, Parasite</span>
+          <span>Bots vs Humain</span>
           <span class="date">2026-10-15</span>
+        </a>
+      </li>
+      <li>
+        <a href="test/26-10-14-lantern/">
+          <span class="v">·</span>
+          <span>Lantern</span>
+          <span class="date">2026-10-14</span>
+        </a>
+      </li>
+      <li>
+        <a href="test/26-10-08-soundroom/">
+          <span class="v">·</span>
+          <span>Shared Listening Room</span>
+          <span class="date">2026-10-08</span>
         </a>
       </li>
     </ul>
@@ -132,7 +133,7 @@ body{background:var(--bg); color:var(--ink); font-family:var(--font-mono); font-
 for (const icon of document.querySelectorAll('[data-window]')) {
   const win = document.getElementById(icon.dataset.window);
   const n = win.querySelectorAll('.versions li').length;
-  win.querySelector('.count').textContent = n + (n === 1 ? ' version' : ' versions');
+  win.querySelector('.count').textContent = n + (n === 1 ? ' item' : ' items');
 
   const close = () => { win.hidden = true; icon.classList.remove('open'); icon.focus(); };
   icon.addEventListener('click', () => {

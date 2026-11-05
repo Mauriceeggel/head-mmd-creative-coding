@@ -61,6 +61,7 @@ From there, we began exploring different ideas:
 # Project
 
 ![sketch](/process/img/15.jpeg)
+![sketch](/process/img/16.jpeg)
 
 --> Each participant uses their phone to send inputs into a shared world (flux), which unfolds on a computer screen within a web browser. 
 
