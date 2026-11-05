@@ -55,3 +55,15 @@ From there, we began exploring different ideas:
 
 ![sound room](/process/img/11.jpg)
 ![sound room](/process/img/12.jpg)
+
+<hr>
+
+# Project
+
+![sketch](/process/img/15.jpeg)
+
+--> Each participant uses their phone to send inputs into a shared world (flux), which unfolds on a computer screen within a web browser. 
+
+réf:
+![emissary sunsets the self](/process/img/14.jpg)
+![Dwarf](/process/img/13.jpg)
