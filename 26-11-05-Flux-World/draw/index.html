@@ -8,12 +8,13 @@
 	</head>
 	<body>
 
-		<h1>Draw a shape</h1>
+		<h1>Draw a pylon</h1>
+		<p id="aide">Your lines are mirrored. The bottom is the ground.</p>
 
-		<canvas id="dessin" width="512" height="512"></canvas>
+		<canvas id="dessin" width="400" height="800"></canvas>
 
 		<div id="couleurs">
-			<button class="couleur choisie" style="--c:#111111" data-couleur="#111111" aria-label="Black"></button>
+			<button class="couleur choisie" style="--c:#2b2e33" data-couleur="#2b2e33" aria-label="Steel"></button>
 			<button class="couleur" style="--c:#e0483e" data-couleur="#e0483e" aria-label="Red"></button>
 			<button class="couleur" style="--c:#f2b632" data-couleur="#f2b632" aria-label="Yellow"></button>
 			<button class="couleur" style="--c:#3a7be0" data-couleur="#3a7be0" aria-label="Blue"></button>
@@ -21,6 +22,7 @@
 		</div>
 
 		<div id="boutons">
+			<button id="annuler" type="button">Undo</button>
 			<button id="effacer" type="button">Clear</button>
 			<button id="envoyer" type="button">Send</button>
 		</div>

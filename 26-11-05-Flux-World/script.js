@@ -1,26 +1,29 @@
 // Flux World — l'écran
-// Un champ de pylônes à perte de vue, dans la brume.
-// Chaque dessin envoyé depuis un téléphone (draw/) devient un pylône
-// qui sort de terre, se branche à ses voisins et envoie du courant dans le réseau.
+// La caméra avance dans un champ de pylônes sans fin, dans la brume.
+// Chaque dessin envoyé depuis un téléphone (draw/) devient un pylône en 3D :
+// le dessin (en miroir) forme la face avant et la face arrière,
+// reliées par des barreaux et des croisillons, comme un vrai treillis métallique.
+// Le nouveau pylône sort de terre devant la caméra et se branche au réseau.
 
 import * as THREE from "three";
 
 // ---------- réglages ----------
-const ECART_LIGNES = 60;      // distance entre deux lignes électriques
+const ECART_LIGNES = 70;      // distance entre deux lignes électriques
 const ECART_PYLONES = 40;     // distance entre deux pylônes sur une ligne
-const ETENDUE = 720;          // les lignes vont jusque-là (cachées par la brume)
+const PERIODE = 1440;         // le monde se répète tous les 1440 m (la caméra boucle)
 const HAUTEUR_GRAND = 22;     // pylônes de base
-const HAUTEUR_PETIT = 11;     // pylônes dessinés
-const RAYON_DESSINS = 70;     // zone où sortent les nouveaux pylônes
-const TAILLE_DESSIN = 4;      // taille du dessin en haut du pylône
+const HAUTEUR_DESSIN = 20;    // hauteur d'un pylône dessiné (toute la hauteur du canvas)
+const LARGEUR_DESSIN = 10;    // largeur d'un pylône dessiné (toute la largeur du canvas)
 const VOISINS = 3;            // nombre de câbles d'un nouveau pylône
 const DUREE_POUSSE = 3;       // secondes pour qu'un pylône sorte de terre
 const DUREE_OBSERVATION = 6;  // secondes passées à regarder un nouveau pylône
-const NB_IMPULSIONS = 140;    // points de courant qui circulent
+const VITESSE = 4;            // vitesse de marche de la caméra (m/s)
+const COULOIR = 35;           // la caméra marche entre la ligne z = 0 et la ligne z = 70
+const NB_IMPULSIONS = 140;
 
 const COULEUR_BRUME = 0x8e979e;
+const COULEUR_ACIER = 0x2b2e33;
 const COULEUR_COURANT = 0xd9f3ff;
-const COULEURS_COURANT = { bleu: 0x5aa0ff, rouge: 0xff6a5a, autre: 0xfff0b0 };
 
 
 // ---------- code QR vers la page dessin ----------
@@ -50,15 +53,15 @@ function redimensionner() {
 redimensionner();
 window.addEventListener("resize", redimensionner);
 
-scene.add(new THREE.HemisphereLight(0xdfe6ea, 0x5b6345, 1.3));
-const soleil = new THREE.DirectionalLight(0xfff0dd, 0.9);
+scene.add(new THREE.HemisphereLight(0xdfe6ea, 0x5b6345, 1.5));
+const soleil = new THREE.DirectionalLight(0xfff0dd, 1.0);
 soleil.position.set(-40, 60, 30);
 scene.add(soleil);
 
 const horloge = new THREE.Clock();
 
 
-// ---------- hasard reproductible ----------
+// ---------- outils ----------
 function creerHasard(graine) {
 	return function () {
 		graine = (graine * 1664525 + 1013904223) % 4294967296;
@@ -74,105 +77,104 @@ function hacher(texte) {
 	return h;
 }
 
-
-// ---------- le champ ----------
-function creerSol() {
-	const geo = new THREE.PlaneGeometry(3000, 3000);
-	geo.rotateX(-Math.PI / 2);
-	scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x7d8a58 })));
-}
-
-// des milliers de brins d'herbe autour du centre
-function creerHerbe() {
-	const brin = new THREE.BufferGeometry();
-	brin.setAttribute("position", new THREE.Float32BufferAttribute([-0.07, 0, 0, 0.07, 0, 0, 0, 1, 0], 3));
-	brin.computeVertexNormals();
-
-	const nombre = 40000;
-	const herbe = new THREE.InstancedMesh(brin, new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }), nombre);
-	const hasard = creerHasard(7);
-	const matrice = new THREE.Matrix4();
-	const rotation = new THREE.Quaternion();
-	const angles = new THREE.Euler();
-	const position = new THREE.Vector3();
-	const echelle = new THREE.Vector3();
-	const clair = new THREE.Color(0xa9b06c);
-	const fonce = new THREE.Color(0x66764a);
-	const couleur = new THREE.Color();
-
-	for (let i = 0; i < nombre; i++) {
-		const a = hasard() * Math.PI * 2;
-		const r = Math.sqrt(hasard()) * 230;
-		position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
-		angles.set((hasard() - 0.5) * 0.5, hasard() * Math.PI, (hasard() - 0.5) * 0.5);
-		rotation.setFromEuler(angles);
-		echelle.set(1 + hasard(), 0.5 + hasard() * 1.1, 1);
-		matrice.compose(position, rotation, echelle);
-		herbe.setMatrixAt(i, matrice);
-		herbe.setColorAt(i, couleur.copy(fonce).lerp(clair, hasard()));
-	}
-	scene.add(herbe);
+// la copie d'un x la plus proche de la caméra (le monde boucle)
+function plusProche(x) {
+	return x + Math.round((camera.position.x - x) / PERIODE) * PERIODE;
 }
 
 
-// ---------- pylônes et câbles ----------
-const matPylone = new THREE.LineBasicMaterial({ color: 0x23262a });
-const matCable = new THREE.LineBasicMaterial({ color: 0x1d1f22 });
+// ---------- poutres ----------
+// transforme une liste de poutres { a: [x,y,z], b: [x,y,z], r } en une géométrie 3D
+// (chaque poutre est un petit prisme à 4 faces)
+function geometriePoutres(poutres) {
+	const positions = [];
+	const A = new THREE.Vector3();
+	const B = new THREE.Vector3();
+	const d = new THREE.Vector3();
+	const u = new THREE.Vector3();
+	const v = new THREE.Vector3();
+	const haut = new THREE.Vector3();
 
-const pylones = [];   // { x, z, accroches: [Vector3] }
-const cables = [];    // { points: [Vector3], milieu, couleur }
+	for (const p of poutres) {
+		A.fromArray(p.a);
+		B.fromArray(p.b);
+		d.subVectors(B, A);
+		if (d.lengthSq() < 1e-6) continue;
+		d.normalize();
+		haut.set(0, 1, 0);
+		if (Math.abs(d.y) > 0.95) haut.set(1, 0, 0);
+		u.crossVectors(d, haut).normalize().multiplyScalar(p.r);
+		v.crossVectors(d, u).normalize().multiplyScalar(p.r);
 
-// la structure d'un pylône en segments (x1,y1,z1, x2,y2,z2, ...) + ses points d'accroche
-function formePylone(h, base, haut, avecBras) {
-	const segments = [];
-	function segment(a, b) {
-		segments.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+		const decalages = [u.clone(), v.clone(), u.clone().negate(), v.clone().negate()];
+		const coinsA = decalages.map(function (o) { return A.clone().add(o); });
+		const coinsB = decalages.map(function (o) { return B.clone().add(o); });
+
+		for (let k = 0; k < 4; k++) {
+			const k2 = (k + 1) % 4;
+			for (const c of [coinsA[k], coinsB[k], coinsB[k2], coinsA[k], coinsB[k2], coinsA[k2]]) {
+				positions.push(c.x, c.y, c.z);
+			}
+		}
 	}
+
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+	geo.computeVertexNormals();
+	return geo;
+}
+
+function materiauAcier(couleur) {
+	return new THREE.MeshLambertMaterial({ color: couleur, flatShading: true, side: THREE.DoubleSide });
+}
+
+
+// ---------- les pylônes de base ----------
+function formePyloneDeBase(h) {
+	const base = 2.4;
+	const haut = 0.7;
+	const poutres = [];
 	function coins(y) {
 		const w = base + (haut - base) * (y / h);
 		return [[-w, y, -w], [w, y, -w], [w, y, w], [-w, y, w]];
 	}
 
-	// le treillis : montants, ceintures et croix
-	const niveaux = 6;
+	const niveaux = 5;
 	for (let i = 0; i < niveaux; i++) {
 		const bas = coins(h * i / niveaux);
 		const dessus = coins(h * (i + 1) / niveaux);
 		for (let k = 0; k < 4; k++) {
 			const k2 = (k + 1) % 4;
-			segment(bas[k], dessus[k]);
-			segment(dessus[k], dessus[k2]);
-			segment(bas[k], dessus[k2]);
-			segment(bas[k2], dessus[k]);
+			poutres.push({ a: bas[k], b: dessus[k], r: 0.24 });        // montant
+			poutres.push({ a: dessus[k], b: dessus[k2], r: 0.11 });    // ceinture
+			poutres.push({ a: bas[k], b: dessus[k2], r: 0.08 });       // croix
+			poutres.push({ a: bas[k2], b: dessus[k], r: 0.08 });
 		}
 	}
 
-	// la pointe
 	const sommet = [0, h * 1.12, 0];
-	for (const coin of coins(h)) segment(coin, sommet);
+	for (const coin of coins(h)) poutres.push({ a: coin, b: sommet, r: 0.12 });
 	const accroches = [sommet];
 
-	// les bras qui portent les câbles
-	if (avecBras) {
-		for (const [hauteurBras, longueur] of [[0.72, h * 0.42], [0.88, h * 0.32]]) {
-			const y = h * hauteurBras;
-			const w = base + (haut - base) * hauteurBras;
-			for (const cote of [-1, 1]) {
-				const bout = [0, y, cote * longueur];
-				segment([-w, y, cote * w], bout);
-				segment([w, y, cote * w], bout);
-				segment([-w, y + h * 0.06, cote * w], bout);
-				segment([w, y + h * 0.06, cote * w], bout);
-				accroches.push(bout);
-			}
+	for (const [hauteurBras, longueur] of [[0.72, h * 0.42], [0.88, h * 0.32]]) {
+		const y = h * hauteurBras;
+		const w = base + (haut - base) * hauteurBras;
+		for (const cote of [-1, 1]) {
+			const bout = [0, y, cote * longueur];
+			poutres.push({ a: [-w, y, cote * w], b: bout, r: 0.12 });
+			poutres.push({ a: [w, y, cote * w], b: bout, r: 0.12 });
+			poutres.push({ a: [-w, y + h * 0.06, cote * w], b: bout, r: 0.08 });
+			poutres.push({ a: [w, y + h * 0.06, cote * w], b: bout, r: 0.08 });
+			accroches.push(bout);
 		}
 	}
-
-	return { segments: segments, accroches: accroches };
+	return { poutres: poutres, accroches: accroches };
 }
 
-// un câble qui pend entre deux points
-function ajouterCable(a, b, couleur, segments) {
+const pylones = [];   // pylônes de base : { x, z, accroches: [Vector3] }
+const cables = [];    // { points: [Vector3], milieu, couleur, groupe }
+
+function pointsCable(a, b) {
 	const points = [];
 	const affaissement = a.distanceTo(b) * 0.06;
 	for (let i = 0; i <= 12; i++) {
@@ -181,32 +183,35 @@ function ajouterCable(a, b, couleur, segments) {
 		p.y -= affaissement * 4 * t * (1 - t);
 		points.push(p);
 	}
-	for (let i = 0; i < 12; i++) {
+	return points;
+}
+
+function versSegments(points, segments) {
+	for (let i = 0; i < points.length - 1; i++) {
 		segments.push(points[i].x, points[i].y, points[i].z, points[i + 1].x, points[i + 1].y, points[i + 1].z);
 	}
-	const cable = { points: points, milieu: points[6], couleur: couleur };
-	cables.push(cable);
-	return cable;
 }
 
-function lignes(segments, materiau) {
+const matCable = new THREE.LineBasicMaterial({ color: 0x1d1f22 });
+
+function lignes(segments) {
 	const geo = new THREE.BufferGeometry();
 	geo.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
-	return new THREE.LineSegments(geo, materiau);
+	return new THREE.LineSegments(geo, matCable);
 }
 
-// les lignes électriques de base, qui partent à l'infini dans la brume
+// les lignes électriques : assez loin dans toutes les directions pour que la brume cache les bords,
+// et un peu plus que la période pour que la boucle ne se voie pas
 function creerChamp() {
-	const forme = formePylone(HAUTEUR_GRAND, 2.2, 0.6, true);
-	const segmentsPylones = [];
-	const segmentsCables = [];
+	const forme = formePyloneDeBase(HAUTEUR_GRAND);
+	const geo = geometriePoutres(forme.poutres);
+	const positions = [];
+	const segments = [];
 
-	for (let z = -ETENDUE; z <= ETENDUE; z += ECART_LIGNES) {
+	for (let z = -3 * ECART_LIGNES; z <= 4 * ECART_LIGNES; z += ECART_LIGNES) {
 		let precedent = null;
-		for (let x = -ETENDUE; x <= ETENDUE; x += ECART_PYLONES) {
-			for (let i = 0; i < forme.segments.length; i += 3) {
-				segmentsPylones.push(forme.segments[i] + x, forme.segments[i + 1], forme.segments[i + 2] + z);
-			}
+		for (let x = -PERIODE / 2 - 320; x <= PERIODE / 2 + 320; x += ECART_PYLONES) {
+			positions.push([x, z]);
 			const pylone = {
 				x: x,
 				z: z,
@@ -214,7 +219,9 @@ function creerChamp() {
 			};
 			if (precedent) {
 				for (let k = 0; k < pylone.accroches.length; k++) {
-					ajouterCable(precedent.accroches[k], pylone.accroches[k], COULEUR_COURANT, segmentsCables);
+					const points = pointsCable(precedent.accroches[k], pylone.accroches[k]);
+					versSegments(points, segments);
+					cables.push({ points: points, milieu: points[6], couleur: COULEUR_COURANT, groupe: null });
 				}
 			}
 			pylones.push(pylone);
@@ -222,17 +229,254 @@ function creerChamp() {
 		}
 	}
 
-	scene.add(lignes(segmentsPylones, matPylone));
-	scene.add(lignes(segmentsCables, matCable));
+	const champ = new THREE.InstancedMesh(geo, materiauAcier(COULEUR_ACIER), positions.length);
+	const m = new THREE.Matrix4();
+	positions.forEach(function (p, i) {
+		m.makeTranslation(p[0], 0, p[1]);
+		champ.setMatrixAt(i, m);
+	});
+	scene.add(champ);
+	scene.add(lignes(segments));
+}
+
+function creerSol() {
+	const geo = new THREE.PlaneGeometry(6000, 6000);
+	geo.rotateX(-Math.PI / 2);
+	scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x6f7a4f })));
 }
 
 creerSol();
-creerHerbe();
 creerChamp();
 
 
+// ---------- les pylônes dessinés ----------
+// le treillis s'affine en montant
+function profondeur(y) {
+	return 1.1 * (1 - 0.55 * y / HAUTEUR_DESSIN);
+}
+
+// reprend un trait en points espacés régulièrement (pour les barreaux et les croisillons)
+function reechantillonner(pts, pas) {
+	if (pts.length < 2) return pts.slice();
+	const resultat = [pts[0]];
+	let reste = pas;
+	for (let i = 0; i + 1 < pts.length; i++) {
+		const [x1, y1] = pts[i];
+		const [x2, y2] = pts[i + 1];
+		const longueur = Math.hypot(x2 - x1, y2 - y1);
+		let parcouru = 0;
+		while (longueur - parcouru >= reste) {
+			parcouru += reste;
+			const t = parcouru / longueur;
+			resultat.push([x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]);
+			reste = pas;
+		}
+		reste -= longueur - parcouru;
+	}
+	resultat.push(pts[pts.length - 1]);
+	return resultat;
+}
+
+// transforme les traits du téléphone en poutres 3D (par couleur) + points d'accroche.
+// Le dessin est posé face à la caméra qui marche : sa largeur va sur l'axe z,
+// et le treillis prend de l'épaisseur sur l'axe x (face avant / face arrière).
+function formeDessinee(traits) {
+	const parCouleur = {};
+	const tousLesPoints = [];
+
+	// (largeur, hauteur, épaisseur) -> [x, y, z] du monde
+	function point3D(l, h, e) {
+		return [e, h, l];
+	}
+
+	for (const trait of traits) {
+		const pts = [];
+		for (let i = 0; i + 1 < trait.points.length; i += 2) {
+			pts.push([trait.points[i] * LARGEUR_DESSIN, Math.max(0, trait.points[i + 1]) * HAUTEUR_DESSIN]);
+		}
+		if (!parCouleur[trait.couleur]) parCouleur[trait.couleur] = [];
+		const poutres = parCouleur[trait.couleur];
+
+		for (const miroir of [1, -1]) {
+			const p2 = pts.map(function (p) { return [p[0] * miroir, p[1]]; });
+
+			// les deux faces suivent le trait exactement
+			for (let i = 0; i < p2.length; i++) {
+				tousLesPoints.push(p2[i]);
+				if (i + 1 < p2.length) {
+					const [l, h] = p2[i];
+					const [l2, h2] = p2[i + 1];
+					for (const face of [1, -1]) {
+						poutres.push({ a: point3D(l, h, face * profondeur(h)), b: point3D(l2, h2, face * profondeur(h2)), r: 0.17 });
+					}
+				}
+			}
+
+			// barreaux et croisillons tous les 1,2 m
+			const r = reechantillonner(p2, 1.2);
+			for (let i = 0; i < r.length; i++) {
+				const [l, h] = r[i];
+				const d = profondeur(h);
+				poutres.push({ a: point3D(l, h, -d), b: point3D(l, h, d), r: 0.08 });
+				if (i + 1 < r.length) {
+					const [l2, h2] = r[i + 1];
+					const s = i % 2 === 0 ? 1 : -1;
+					poutres.push({ a: point3D(l, h, d * s), b: point3D(l2, h2, -profondeur(h2) * s), r: 0.06 });
+				}
+			}
+		}
+	}
+
+	// accroches : le point le plus haut, et les deux points les plus écartés
+	let sommet = [0, 0];
+	let bout = [0, 0];
+	for (const p of tousLesPoints) {
+		if (p[1] > sommet[1]) sommet = p;
+		if (p[0] > bout[0]) bout = p;
+	}
+	const accroches = [
+		new THREE.Vector3().fromArray(point3D(sommet[0], sommet[1], 0)),
+		new THREE.Vector3().fromArray(point3D(bout[0], bout[1], 0)),
+		new THREE.Vector3().fromArray(point3D(-bout[0], bout[1], 0))
+	];
+
+	return { parCouleur: parCouleur, accroches: accroches };
+}
+
+// la couleur du courant : celle qui domine dans le dessin, en plus lumineux
+function couleurDuCourant(traits) {
+	const compte = {};
+	for (const t of traits) compte[t.couleur] = (compte[t.couleur] || 0) + t.points.length;
+	let meilleure = null;
+	for (const c in compte) if (!meilleure || compte[c] > compte[meilleure]) meilleure = c;
+	if (!meilleure || meilleure === "#2b2e33") return COULEUR_COURANT;
+	return new THREE.Color(meilleure).lerp(new THREE.Color(0xffffff), 0.35).getHex();
+}
+
+const pylonesDessines = [];
+const fileAttente = [];
+
+// un endroit libre : devant la caméra pour un nouveau dessin, sinon d'après la clé
+function choisirPlace(cle, estNouveau) {
+	const hasard = creerHasard(hacher(cle));
+	let x = estNouveau ? camera.position.x + 70 + fileAttente.length * 30 : (hasard() - 0.5) * PERIODE;
+	const cote = hasard() < 0.5 ? -1 : 1;
+	const z = COULOIR + cote * (15 + hasard() * 3);
+
+	// pas trop près d'un autre pylône dessiné
+	for (let essai = 0; essai < 50; essai++) {
+		const libre = pylonesDessines.every(function (p) {
+			return Math.abs(plusProche(p.x) - plusProche(x)) > 14 || Math.abs(p.z - z) > 14;
+		});
+		if (libre) break;
+		x += 16;
+	}
+	x = ((x + PERIODE / 2) % PERIODE + PERIODE) % PERIODE - PERIODE / 2;
+	return { x: x, z: z };
+}
+
+function ajouterPylone(cle, data, estNouveau) {
+	const place = (typeof data.x === "number") ? { x: data.x, z: data.z } : choisirPlace(cle, estNouveau);
+	if (estNouveau && typeof data.x !== "number") dessinsRef.child(cle).update(place);
+
+	const forme = formeDessinee(data.traits);
+	const groupe = new THREE.Group();
+	groupe.position.set(place.x, 0, place.z);
+
+	const structure = new THREE.Group();
+	for (const couleur in forme.parCouleur) {
+		structure.add(new THREE.Mesh(geometriePoutres(forme.parCouleur[couleur]), materiauAcier(couleur)));
+	}
+	groupe.add(structure);
+	scene.add(groupe);
+
+	// se brancher aux pylônes les plus proches (dans les coordonnées du pylône)
+	const couleurCourant = couleurDuCourant(data.traits);
+	const candidats = pylones.concat(pylonesDessines).map(function (p) {
+		const px = p.groupe ? plusProcheDe(p.x, place.x) : p.x;
+		return { p: p, dx: px - p.x, distance: Math.hypot(px - place.x, p.z - place.z) };
+	}).sort(function (a, b) { return a.distance - b.distance; }).slice(0, VOISINS);
+
+	const segments = [];
+	const cablesDuPylone = [];
+	for (const c of candidats) {
+		let meilleur = null;
+		for (const a of forme.accroches) {
+			const aMonde = a.clone().add(groupe.position);
+			for (const b of c.p.accroches) {
+				const bMonde = b.clone();
+				if (c.p.groupe) bMonde.add(new THREE.Vector3(c.p.x + c.dx, 0, c.p.z));
+				const d = aMonde.distanceTo(bMonde);
+				if (!meilleur || d < meilleur.d) meilleur = { d: d, a: a, b: bMonde.sub(groupe.position) };
+			}
+		}
+		const points = pointsCable(meilleur.a, meilleur.b);
+		versSegments(points, segments);
+		const cable = { points: points, milieu: points[6], couleur: couleurCourant, groupe: groupe };
+		cables.push(cable);
+		cablesDuPylone.push(cable);
+	}
+	const fils = lignes(segments);
+	groupe.add(fils);
+
+	const pylone = {
+		x: place.x,
+		z: place.z,
+		groupe: groupe,
+		accroches: forme.accroches,   // locales
+		structure: structure,
+		fils: fils,
+		cables: cablesDuPylone,
+		arrivee: estNouveau ? horloge.elapsedTime : -100,
+		branche: !estNouveau
+	};
+	pylonesDessines.push(pylone);
+
+	if (estNouveau) {
+		fileAttente.push(pylone);
+		montrerMessage();
+	}
+}
+
+function plusProcheDe(x, reference) {
+	return x + Math.round((reference - x) / PERIODE) * PERIODE;
+}
+
+// place chaque pylône dessiné sur la copie la plus proche de la caméra, et anime sa pousse
+function animerPylones(temps) {
+	for (const p of pylonesDessines) {
+		p.groupe.position.x = plusProche(p.x);
+
+		const t = Math.min(1, (temps - p.arrivee) / DUREE_POUSSE);
+		const pousse = 1 - Math.pow(1 - t, 3);
+		p.structure.scale.y = Math.max(0.001, pousse);
+		p.fils.visible = t >= 1;
+
+		if (t >= 1 && !p.branche) {
+			p.branche = true;
+			decharge(p);
+		}
+	}
+}
+
+let minuterieMessage = null;
+function montrerMessage() {
+	const message = document.getElementById("arrivee");
+	message.hidden = false;
+	clearTimeout(minuterieMessage);
+	minuterieMessage = setTimeout(function () { message.hidden = true; }, 3500);
+}
+
+// les dessins déjà envoyés sont déjà là, les nouveaux poussent devant la caméra
+let charge = false;
+dessinsRef.on("child_added", function (snap) {
+	const data = snap.val();
+	if (data && Array.isArray(data.traits)) ajouterPylone(snap.key, data, charge);
+});
+dessinsRef.once("value", function () { charge = true; });
+
+
 // ---------- le courant ----------
-// une petite lueur ronde
 function creerLueur() {
 	const c = document.createElement("canvas");
 	c.width = c.height = 64;
@@ -261,16 +505,18 @@ for (let i = 0; i < NB_IMPULSIONS; i++) {
 	impulsions.push({ sprite: sprite, cable: null, t: 0, vitesse: 0, sens: 1 });
 }
 
-// les câbles proches de la caméra (mis à jour de temps en temps)
-let cablesProches = [];
-let cablesDessines = [];
-let dernierTri = -10;
+function milieuMonde(cable) {
+	return cable.groupe ? cable.milieu.x + cable.groupe.position.x : cable.milieu.x;
+}
 
+let cablesProches = [];
+let dernierTri = -10;
 function trierCables(temps) {
-	if (temps - dernierTri < 2) return;
+	if (temps - dernierTri < 1.5) return;
 	dernierTri = temps;
 	cablesProches = cables.filter(function (c) {
-		return Math.hypot(c.milieu.x - camera.position.x, c.milieu.z - camera.position.z) < 150;
+		const z = c.groupe ? c.milieu.z + c.groupe.position.z : c.milieu.z;
+		return Math.hypot(milieuMonde(c) - camera.position.x, z - camera.position.z) < 160;
 	});
 }
 
@@ -278,14 +524,13 @@ function lancerImpulsion(imp, cable, retard, sens) {
 	imp.cable = cable;
 	imp.t = -retard;
 	imp.sens = sens;
-	imp.vitesse = 0.25 + Math.random() * 0.25;   // en "câbles par seconde"
+	imp.vitesse = 0.25 + Math.random() * 0.25;
 	imp.sprite.material.color.setHex(cable.couleur);
 }
 
 function relancer(imp) {
-	const liste = cablesDessines.length > 0 && Math.random() < 0.4 ? cablesDessines : cablesProches;
-	if (liste.length === 0) return;
-	const cable = liste[Math.floor(Math.random() * liste.length)];
+	if (cablesProches.length === 0) return;
+	const cable = cablesProches[Math.floor(Math.random() * cablesProches.length)];
 	lancerImpulsion(imp, cable, Math.random() * 2, Math.random() < 0.5 ? 1 : -1);
 }
 
@@ -299,11 +544,10 @@ function animerCourant(dt) {
 			imp.sprite.visible = false;
 			continue;
 		}
-
-		// position le long du câble
 		const u = (imp.sens > 0 ? imp.t : 1 - imp.t) * 12;
 		const i = Math.min(11, Math.floor(u));
 		imp.sprite.position.lerpVectors(imp.cable.points[i], imp.cable.points[i + 1], u - i);
+		if (imp.cable.groupe) imp.sprite.position.add(imp.cable.groupe.position);
 		imp.sprite.visible = true;
 	}
 }
@@ -320,154 +564,10 @@ function decharge(pylone) {
 }
 
 
-// ---------- les pylônes dessinés ----------
-const chargeur = new THREE.TextureLoader();
-const pylonesDessines = [];
-const fileAttente = [];
-
-// trouve la couleur la plus présente dans le dessin : "bleu", "rouge" ou "autre"
-const COULEURS = [
-	{ nom: "bleu", r: 0x3a, g: 0x7b, b: 0xe0 },
-	{ nom: "rouge", r: 0xe0, g: 0x48, b: 0x3e },
-	{ nom: "autre", r: 0x11, g: 0x11, b: 0x11 },
-	{ nom: "autre", r: 0xf2, g: 0xb6, b: 0x32 },
-	{ nom: "autre", r: 0x3f, g: 0xa4, b: 0x6a }
-];
-
-function couleurDominante(image) {
-	const c = document.createElement("canvas");
-	c.width = c.height = 64;
-	const ctx = c.getContext("2d");
-	ctx.drawImage(image, 0, 0, 64, 64);
-	const pixels = ctx.getImageData(0, 0, 64, 64).data;
-
-	const compte = { bleu: 0, rouge: 0, autre: 0 };
-	for (let i = 0; i < pixels.length; i += 4) {
-		if (pixels[i + 3] < 128) continue;
-		let meilleure = "autre";
-		let distanceMin = Infinity;
-		for (const coul of COULEURS) {
-			const d = (pixels[i] - coul.r) ** 2 + (pixels[i + 1] - coul.g) ** 2 + (pixels[i + 2] - coul.b) ** 2;
-			if (d < distanceMin) { distanceMin = d; meilleure = coul.nom; }
-		}
-		compte[meilleure]++;
-	}
-
-	if (compte.bleu > compte.rouge && compte.bleu > compte.autre) return "bleu";
-	if (compte.rouge > compte.bleu && compte.rouge > compte.autre) return "rouge";
-	return "autre";
-}
-
-// un endroit libre près du centre, toujours le même pour un même dessin
-function choisirPlace(cle) {
-	const hasard = creerHasard(hacher(cle));
-	for (let essai = 0; essai < 200; essai++) {
-		const angle = hasard() * Math.PI * 2;
-		const r = Math.sqrt(hasard()) * RAYON_DESSINS;
-		const x = Math.cos(angle) * r;
-		const z = Math.sin(angle) * r;
-		const libre = pylones.every(function (p) { return Math.hypot(p.x - x, p.z - z) > 8; });
-		if (libre) return { x: x, z: z };
-	}
-	return { x: (hasard() - 0.5) * RAYON_DESSINS, z: (hasard() - 0.5) * RAYON_DESSINS };
-}
-
-function ajouterDessin(cle, image, estNouveau) {
-	const place = choisirPlace(cle);
-	const hautMat = HAUTEUR_PETIT * 1.12;
-
-	const groupe = new THREE.Group();
-	groupe.position.set(place.x, 0, place.z);
-
-	const mat = lignes(formePylone(HAUTEUR_PETIT, 1, 0.3, false).segments, matPylone);
-	groupe.add(mat);
-
-	const texture = chargeur.load(image, function () {
-		const type = couleurDominante(texture.image);
-		for (const cable of pylone.cables) cable.couleur = COULEURS_COURANT[type];
-	});
-	texture.colorSpace = THREE.SRGBColorSpace;
-	const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, alphaTest: 0.1 }));
-	sprite.scale.set(TAILLE_DESSIN, TAILLE_DESSIN, 1);
-	groupe.add(sprite);
-	scene.add(groupe);
-
-	// se brancher aux pylônes les plus proches
-	const sommet = new THREE.Vector3(place.x, hautMat, place.z);
-	const voisins = pylones.slice().sort(function (a, b) {
-		return Math.hypot(a.x - place.x, a.z - place.z) - Math.hypot(b.x - place.x, b.z - place.z);
-	}).slice(0, VOISINS);
-
-	const segmentsCables = [];
-	const cablesDuPylone = [];
-	for (const voisin of voisins) {
-		let accroche = voisin.accroches[0];
-		for (const a of voisin.accroches) {
-			if (a.distanceTo(sommet) < accroche.distanceTo(sommet)) accroche = a;
-		}
-		cablesDuPylone.push(ajouterCable(sommet, accroche, COULEURS_COURANT.autre, segmentsCables));
-	}
-	const fils = lignes(segmentsCables, matCable);
-	scene.add(fils);
-
-	const pylone = {
-		x: place.x,
-		z: place.z,
-		accroches: [sommet],
-		mat: mat,
-		sprite: sprite,
-		fils: fils,
-		cables: cablesDuPylone,
-		hautMat: hautMat,
-		arrivee: estNouveau ? horloge.elapsedTime : -100,
-		branche: !estNouveau
-	};
-	pylones.push(pylone);
-	pylonesDessines.push(pylone);
-	cablesDessines = cablesDessines.concat(cablesDuPylone);
-
-	if (estNouveau) {
-		fileAttente.push(pylone);
-		montrerMessage();
-	}
-}
-
-// le pylône sort de terre, le dessin monte avec lui, puis les câbles se branchent
-function animerPylones(temps) {
-	for (const p of pylonesDessines) {
-		const t = Math.min(1, (temps - p.arrivee) / DUREE_POUSSE);
-		const pousse = 1 - Math.pow(1 - t, 3);
-		p.mat.scale.y = Math.max(0.001, pousse);
-		p.sprite.position.y = p.hautMat * pousse + TAILLE_DESSIN / 2 + 0.2;
-		p.fils.visible = t >= 1;
-
-		if (t >= 1 && !p.branche) {
-			p.branche = true;
-			decharge(p);
-		}
-	}
-}
-
-let minuterieMessage = null;
-function montrerMessage() {
-	const message = document.getElementById("arrivee");
-	message.hidden = false;
-	clearTimeout(minuterieMessage);
-	minuterieMessage = setTimeout(function () { message.hidden = true; }, 3500);
-}
-
-// les dessins déjà envoyés sont déjà là, les nouveaux déclenchent la visite
-let charge = false;
-dessinsRef.on("child_added", function (snap) {
-	const data = snap.val();
-	if (data && data.image) ajouterDessin(snap.key, data.image, charge);
-});
-dessinsRef.once("value", function () { charge = true; });
-
-
 // ---------- caméra ----------
 let tempsPromenade = 0;
-let mode = "promenade";       // "promenade", "aller" ou "observer"
+let avancee = 0;              // jusqu'où la caméra a marché
+let mode = "marche";          // "marche", "aller" ou "observer"
 let visite = null;
 let angleVisite = 0;
 let debutPhase = 0;
@@ -476,52 +576,65 @@ const voulu = new THREE.Vector3();
 const cibleVoulue = new THREE.Vector3();
 const regard = new THREE.Vector3();
 
-// la promenade dans le champ
-function cheminPromenade(t) {
-	const angle = t * 0.025 + 0.6 * Math.sin(t * 0.07);
-	const r = 50 + 20 * Math.sin(t * 0.05);
-	voulu.set(Math.cos(angle) * r, 6 + 4 * Math.sin(t * 0.11), Math.sin(angle) * r);
-	cibleVoulue.set(Math.sin(t * 0.04) * 30, 10, Math.cos(t * 0.05) * 30);
+// la marche : tout droit dans le couloir entre deux lignes, en ondulant un peu
+function cheminMarche(t) {
+	voulu.set(avancee, 4 + 1.5 * Math.sin(t * 0.13), COULOIR + 6 * Math.sin(t * 0.045));
+	cibleVoulue.set(avancee + 35, 7 + 3 * Math.sin(t * 0.07), COULOIR + 12 * Math.sin(t * 0.03));
 }
 
 function commencerVisite(temps) {
 	visite = fileAttente.shift();
-	angleVisite = Math.atan2(camera.position.z - visite.z, camera.position.x - visite.x);
+	const px = visite.groupe.position.x;
+	angleVisite = Math.atan2(camera.position.z - visite.z, camera.position.x - px);
 	mode = "aller";
 	debutPhase = temps;
 }
 
 function mettreAJourCamera(dt, temps) {
-	if (mode === "promenade") {
+	if (mode === "marche") {
 		tempsPromenade += dt;
-		cheminPromenade(tempsPromenade);
+		avancee += VITESSE * dt;
+		cheminMarche(tempsPromenade);
 		if (fileAttente.length > 0) commencerVisite(temps);
 	}
 
 	if (mode === "aller" || mode === "observer") {
-		if (mode === "observer") angleVisite += dt * 0.12;
-		voulu.set(visite.x + Math.cos(angleVisite) * 15, 9, visite.z + Math.sin(angleVisite) * 15);
-		cibleVoulue.set(visite.x, visite.sprite.position.y - 1, visite.z);
+		const px = visite.groupe.position.x;
+		if (mode === "observer") angleVisite += dt * 0.1;
+		voulu.set(px + Math.cos(angleVisite) * 22, 6, visite.z + Math.sin(angleVisite) * 22);
+		cibleVoulue.set(px, HAUTEUR_DESSIN * 0.5, visite.z);
 
-		if (mode === "aller") {
-			voulu.y += Math.min(camera.position.distanceTo(voulu) * 0.25, 12);
-			if (camera.position.distanceTo(voulu) < 2 || temps - debutPhase > 8) {
-				mode = "observer";
-				debutPhase = temps;
-			}
-		} else if (temps - debutPhase > DUREE_OBSERVATION) {
-			mode = "promenade";
+		if (mode === "aller" && (camera.position.distanceTo(voulu) < 2 || temps - debutPhase > 9)) {
+			mode = "observer";
+			debutPhase = temps;
+		} else if (mode === "observer" && temps - debutPhase > DUREE_OBSERVATION) {
+			// reprendre la marche là où on est
+			mode = "marche";
 			visite = null;
+			avancee = camera.position.x;
 		}
 	}
 
 	voulu.y = Math.max(voulu.y, 1.5);
-	camera.position.lerp(voulu, 1 - Math.exp(-dt * 0.7));
+	camera.position.lerp(voulu, 1 - Math.exp(-dt * 0.8));
 	regard.lerp(cibleVoulue, 1 - Math.exp(-dt * 1.5));
 	camera.lookAt(regard);
+
+	// le monde boucle : quand on a assez marché, on revient d'une période en arrière sans que ça se voie
+	if (camera.position.x > PERIODE / 2) {
+		camera.position.x -= PERIODE;
+		regard.x -= PERIODE;
+		avancee -= PERIODE;
+		for (const p of pylonesDessines) p.groupe.position.x = plusProche(p.x);
+		for (const imp of impulsions) {
+			if (imp.cable && !imp.cable.groupe) imp.cable = null;   // relancées près de la nouvelle position
+		}
+		dernierTri = -10;
+		trierCables(horloge.elapsedTime);
+	}
 }
 
-cheminPromenade(0);
+cheminMarche(0);
 camera.position.copy(voulu);
 regard.copy(cibleVoulue);
 
