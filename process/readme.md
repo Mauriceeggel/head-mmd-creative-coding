@@ -50,3 +50,8 @@ From there, we began exploring different ideas:
 
 ![sound room](/process/img/09.png)
 ![sound room](/process/img/10.png)
+
+## Idea 04 - Stroke / Keystrok Radar
+
+![sound room](/process/img/11.jpg)
+![sound room](/process/img/12.jpg)
