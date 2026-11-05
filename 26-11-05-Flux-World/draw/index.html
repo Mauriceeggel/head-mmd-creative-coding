@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<title>Flux World · Draw</title>
+		<link rel="stylesheet" href="./style.css">
+	</head>
+	<body>
+
+		<h1>Draw a shape</h1>
+
+		<canvas id="dessin" width="512" height="512"></canvas>
+
+		<div id="couleurs">
+			<button class="couleur choisie" style="--c:#111111" data-couleur="#111111" aria-label="Black"></button>
+			<button class="couleur" style="--c:#e0483e" data-couleur="#e0483e" aria-label="Red"></button>
+			<button class="couleur" style="--c:#f2b632" data-couleur="#f2b632" aria-label="Yellow"></button>
+			<button class="couleur" style="--c:#3a7be0" data-couleur="#3a7be0" aria-label="Blue"></button>
+			<button class="couleur" style="--c:#3fa46a" data-couleur="#3fa46a" aria-label="Green"></button>
+		</div>
+
+		<div id="boutons">
+			<button id="effacer" type="button">Clear</button>
+			<button id="envoyer" type="button">Send</button>
+		</div>
+
+		<p id="statut"></p>
+
+		<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+		<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+		<script src="../config.js"></script>
+		<script src="./script.js"></script>
+	</body>
+</html>

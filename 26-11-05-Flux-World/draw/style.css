@@ -1,0 +1,95 @@
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	overflow: hidden;
+	overscroll-behavior: none;
+}
+
+body {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+	padding: 24px 16px;
+	background: #cfe3ea;
+	font-family: monospace;
+	color: #000;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+h1 {
+	margin: 0;
+	font-size: 18px;
+	font-weight: normal;
+}
+
+/* zone de dessin carrée, le fond reste transparent dans l'image envoyée */
+#dessin {
+	width: min(100%, 60vh);
+	aspect-ratio: 1;
+	background: #fff;
+	border-radius: 12px;
+	touch-action: none;
+}
+
+#couleurs {
+	display: flex;
+	gap: 12px;
+}
+
+.couleur {
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	border-radius: 50%;
+	border: 2px solid rgba(0, 0, 0, 0.2);
+	background: var(--c);
+	cursor: pointer;
+}
+
+.couleur.choisie {
+	outline: 3px solid #000;
+	outline-offset: 3px;
+}
+
+#boutons {
+	display: flex;
+	gap: 12px;
+	width: min(100%, 60vh);
+}
+
+#boutons button {
+	flex: 1;
+	padding: 14px;
+	border: 0;
+	border-radius: 10px;
+	font: inherit;
+	font-size: 16px;
+	cursor: pointer;
+}
+
+#effacer {
+	background: #fff;
+	color: #000;
+}
+
+#envoyer {
+	background: #000;
+	color: #fff;
+}
+
+#envoyer:disabled {
+	opacity: 0.4;
+}
+
+#statut {
+	margin: 0;
+	min-height: 1.4em;
+	font-size: 14px;
+}

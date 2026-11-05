@@ -2,13 +2,55 @@
 	box-sizing: border-box;
 }
 
+html,
 body {
 	margin: 0;
-	min-height: 100vh;
+	height: 100%;
+	overflow: hidden;
+	background: #cfe3ea;
+	font-family: monospace;
+}
+
+#monde {
+	display: block;
+	width: 100vw;
+	height: 100vh;
+}
+
+/* code QR en bas à gauche */
+#qr {
+	position: fixed;
+	left: 24px;
+	bottom: 24px;
+	padding: 12px 12px 8px;
+	background: #fff;
+	border-radius: 8px;
+	text-align: center;
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+}
+
+#qr-code svg {
+	display: block;
+	width: 140px;
+	height: 140px;
+}
+
+#qr p {
+	margin: 6px 0 0;
+	font-size: 13px;
+	color: #000;
+}
+
+/* petit message quand un dessin arrive */
+#arrivee {
+	position: fixed;
+	top: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	margin: 0;
+	padding: 8px 14px;
 	background: #000;
 	color: #fff;
-	font-family: monospace;
-	display: flex;
-	align-items: center;
-	justify-content: center;
+	border-radius: 20px;
+	font-size: 13px;
 }
