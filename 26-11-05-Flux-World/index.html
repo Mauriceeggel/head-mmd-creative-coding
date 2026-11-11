@@ -8,18 +8,43 @@
 	</head>
 	<body>
 
-		<canvas id="monde"></canvas>
+		<canvas id="ville"></canvas>
 
-		<aside id="qr">
-			<div id="qr-code"></div>
-			<p>Scan to draw</p>
-		</aside>
+		<!-- étiquettes des bâtiments et curseurs des autres opérateurs, placés par script.js -->
+		<div id="etiquettes"></div>
+		<div id="curseurs"></div>
 
-		<p id="arrivee" hidden>A new pylon joined the network</p>
+		<header id="entete">
+			<h1>Flux World</h1>
+			<p>Municipal Operations Control</p>
+			<p id="horloge">DAY 001 · 00:00</p>
+		</header>
+
+		<section id="indicateurs">
+			<div class="indicateur"><span>Energy</span><span class="barre"><i id="barre-energie"></i></span><b id="val-energie">100%</b></div>
+			<div class="indicateur"><span>Mobility</span><span class="barre"><i id="barre-mobilite"></i></span><b id="val-mobilite">100%</b></div>
+			<div class="indicateur"><span>Incidents</span><b id="val-incidents">0 active</b></div>
+			<div class="indicateur"><span>Operators</span><b id="val-operateurs">1 online</b></div>
+		</section>
+
+		<ol id="journal"></ol>
+
+		<nav id="outils">
+			<div id="boutons">
+				<button data-outil="observer" class="actif"><kbd>1</kbd> Observe</button>
+				<button data-outil="couper"><kbd>2</kbd> Sever line</button>
+				<button data-outil="bloquer"><kbd>3</kbd> Obstruct road</button>
+				<button data-outil="construire"><kbd>4</kbd> Build</button>
+				<button id="zoom-plus" title="Zoom in">+</button>
+				<button id="zoom-moins" title="Zoom out">−</button>
+			</div>
+			<p id="statut">Operator — · authorised</p>
+		</nav>
+
+		<p id="info" hidden></p>
 
 		<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 		<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 		<script src="./config.js"></script>
 
 		<script type="importmap">

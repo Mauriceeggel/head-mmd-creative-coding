@@ -1,4 +1,4 @@
-// Firebase partagé par l'écran (index.html) et le téléphone (draw/)
+// Firebase partagé par tous les navigateurs qui regardent la ville.
 // Même projet que les autres prototypes, Flux World utilise sa propre branche.
 const FIREBASE_CONFIG = {
 	apiKey: "AIzaSyBRBVKFWJQUuRbbEpFQQsUakYUcaiXB1VE",
@@ -10,7 +10,8 @@ const FIREBASE_CONFIG = {
 	appId: "1:385206351842:web:aa47b2a23c8a32a26e6bbb"
 };
 
-const RACINE = "flux-v1";
+// ville-v1 : la ville commune (l'ancienne version avec les pylônes dessinés utilisait flux-v1)
+const RACINE = "ville-v1";
 
 firebase.initializeApp(FIREBASE_CONFIG);
-const dessinsRef = firebase.database().ref(RACINE + "/dessins");
+const base = firebase.database();
