@@ -43,6 +43,13 @@ body{background:var(--ocean); color:var(--paper); font-family:var(--font-mono)}
 #zoom{position:fixed; right:16px; bottom:14px; z-index:20; display:flex; gap:6px}
 #zoom button{font:inherit; font-size:20px; width:36px; height:36px; color:var(--paper); background:var(--ink); border:1px solid var(--paper); cursor:pointer; display:grid; place-items:center; padding:0}
 #globe{color:var(--pink)}
+#infoBtn .q{display:grid; place-items:center; width:22px; height:22px; border:2px solid currentColor; border-radius:50%; font-size:18px; line-height:1; padding-top:1px}
+/* About: a text on the sea, in the middle of the screen; a click anywhere outside it closes it */
+#about{position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:16px}
+#about[hidden]{display:none}
+#about .box{width:min(620px, 100%); max-height:calc(100vh - 32px); overflow:auto; background:rgba(0,0,255,.86); padding:clamp(18px, 4vw, 34px); font-size:clamp(20px, 2.2vw, 26px); line-height:1.2; color:var(--paper)}
+#about p{margin:0 0 .9em}
+#about p:last-child{margin:0}
 body.planet #zin, body.planet #zout{display:none}
 
 /* Planet view */
@@ -100,6 +107,15 @@ body.arriving #hud, body.arriving #zoom{display:none}
   <button id="zin" type="button" aria-label="Zoom in">+</button>
   <button id="zout" type="button" aria-label="Zoom out">−</button>
   <button id="globe" type="button" aria-label="See the planet"></button>
+  <button id="infoBtn" type="button" aria-label="About this project" title="About" aria-expanded="false" aria-controls="about"><span class="q" aria-hidden="true">?</span></button>
+</div>
+
+<div id="about" hidden>
+  <div class="box" role="dialog" aria-label="About this project">
+    <p>Some say the internet is already dead: that most of what we read online is written by machines, for machines, and that the people are a quiet minority lost in the noise. This project takes this idea literally.</p>
+    <p>It is a small planet made of text. Most of it is written by bots: a swarm that never stops posting spam, replies to nobody, reviews of nothing and copies of other lines. Their text crawls and keeps changing, never quite readable. Land rises around the words, and every writer, human or not, has a territory in their own colour.</p>
+    <p>But you are not alone. You may see other cursors moving. When two humans come close, a line joins them. When someone leaves, a faint trace says they were here.</p>
+  </div>
 </div>
 
 <div id="intro">
@@ -1676,6 +1692,15 @@ const FIREBASE_CONFIG = {
     globeBtn.setAttribute('aria-label', toMap ? 'Back to the map' : 'See the planet');
     globeBtn.title = toMap ? 'Back to the map' : 'See the planet';
   }
+  // the "?" opens the about text; a click outside the text (or Escape) closes it
+  const about = $('about'), infoBtn = $('infoBtn');
+  function showAbout(on) {
+    about.hidden = !on; infoBtn.setAttribute('aria-expanded', String(on));
+    if (!on && live && mode === 'map') ta.focus({ preventScroll: true });
+  }
+  infoBtn.addEventListener('click', () => showAbout(about.hidden));
+  about.addEventListener('pointerdown', e => { if (!e.target.closest('.box')) { e.preventDefault(); showAbout(false); } });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !about.hidden) showAbout(false); });
   globeBtn.addEventListener('click', () => { if (document.body.classList.contains('planet')) leavePlanet(); else goPlanet(); });
   addEventListener('keydown', e => { if (e.key === 'Escape' && mode === 'planet') leavePlanet(); });
 
