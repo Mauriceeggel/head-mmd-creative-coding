@@ -71,7 +71,7 @@ body.planet #zin, body.planet #zout{display:none}
 #intro{position:fixed; left:0; top:0; z-index:40; padding:clamp(20px, 5vw, 64px); pointer-events:none; transition:opacity .8s}
 #intro.gone{opacity:0}
 #intro[hidden]{display:none}
-#intro h1{font-family:var(--font-label); font-weight:400; font-size:clamp(40px, 7.5vw, 120px); line-height:.9; margin:0; color:var(--paper); white-space:nowrap}
+#intro h1{font-family:var(--font-label); font-weight:400; font-size:clamp(32px, 6.5vw, 110px); line-height:.9; margin:0; color:var(--paper)}
 #qIn{position:fixed; left:0; top:0; width:2px; height:20px; opacity:0; border:0; padding:0; font-size:16px; resize:none; background:transparent; color:transparent; caret-color:transparent}
 #enterHint{position:fixed; z-index:40; right:clamp(16px, 3vw, 32px); bottom:clamp(14px, 3vw, 28px); font-size:18px; letter-spacing:.04em; opacity:0; transition:opacity 1.6s ease; pointer-events:none}
 #enterHint.on{opacity:.9}
@@ -1756,6 +1756,35 @@ const FIREBASE_CONFIG = {
   //      of the screen; Enter writes it into the world there, then the land and the machine text
   //      around it come up.
   const qIn = $('qIn'), enterHint = $('enterHint');
+  // a different question each time someone arrives, set on two lines of about the same length
+  const QUESTIONS = [
+    'What differentiates humans from robots?',
+    "What can't a machine pretend to feel?",
+    'What would prove you are not a bot?',
+    'What did you do today that no machine did?',
+    'What mistake are you proud of?',
+    'When did you last feel alone online?',
+    'What are you afraid of forgetting?',
+    'What should never be automated?',
+    'What sentence would you write on a wall?',
+    'Say something a machine would never say.',
+    'Write something only you could write.',
+    'What does silence look like?',
+    'Tell us a secret, nobody will know it was you.',
+  ];
+  {
+    const words = pick(QUESTIONS).split(' ');
+    let best = 1, bestLen = Infinity;
+    for (let i = 1; i < words.length; i++) {
+      const len = Math.max(words.slice(0, i).join(' ').length, words.slice(i).join(' ').length);
+      if (len < bestLen) { bestLen = len; best = i; }
+    }
+    // a comma is where the question breathes: break there
+    const comma = words.findIndex(w => w.endsWith(','));
+    if (comma >= 0 && comma < words.length - 1) best = comma + 1;
+    const h = $('introTitle'); h.textContent = words.slice(0, best).join(' ');
+    h.append(document.createElement('br'), words.slice(best).join(' '));
+  }
   startView();
   document.body.classList.add('arriving');
   for (const ev of ['pointerdown', 'wheel']) addEventListener(ev, e => { if (intro) { e.preventDefault(); e.stopPropagation(); qIn.focus({ preventScroll: true }); } }, { capture: true, passive: false });
