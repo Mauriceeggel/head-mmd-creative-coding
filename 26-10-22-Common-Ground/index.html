@@ -43,6 +43,10 @@ body{background:var(--ocean); color:var(--paper); font-family:var(--font-mono)}
 #zoom{position:fixed; right:16px; bottom:14px; z-index:20; display:flex; gap:6px}
 #zoom button{font:inherit; font-size:20px; width:36px; height:36px; color:var(--paper); background:var(--ink); border:1px solid var(--paper); cursor:pointer; display:grid; place-items:center; padding:0}
 #globe{color:var(--pink)}
+#testBtn{position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:20; font:inherit; font-size:18px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--paper); background:var(--ink); border:1px solid var(--paper); padding:4px 14px; cursor:pointer}
+#testBtn.on{background:var(--paper); color:var(--ink)}
+body.arriving #testBtn, body.planet #testBtn{display:none}
 #infoBtn .q{display:grid; place-items:center; width:22px; height:22px; border:2px solid currentColor; border-radius:50%; font-size:18px; line-height:1; padding-top:1px}
 /* About: a text on the sea, in the middle of the screen; a click anywhere outside it closes it */
 #about{position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:16px}
@@ -100,6 +104,7 @@ body.arriving #hud, body.arriving #zoom{display:none}
 
 <div id="toasts" aria-live="polite"></div>
 
+<button id="testBtn" type="button" title="Three fake humans type next to each other (only on your screen)">test</button>
 <div id="hud">
   <div class="row"><span class="chip"><span id="me"></span><span>you</span></span></div>
 </div>
@@ -166,6 +171,19 @@ const FIREBASE_CONFIG = {
   const DECAY_HIT = .06;                 // added right against the human text by one keystroke (1 = dead)
   const DECAY_HEAL = .01;                // per second, when nobody writes nearby
   const DECAY_FADE = 1400;               // ms a dying letter takes to vanish
+  const CLEARING_LIFE = 5 * 60 * 1000;  // ms a patch of dead machine text stays a place where drones come back to copy
+  const COPY_CHANCE = .25;               // share of a drone's posts that are a failed copy, when there is a clearing
+  const COPY_NEAR_X = 12, COPY_NEAR_Y = 4;   // a copy keeps at least this far from any human letter (cells)…
+  const COPY_FAR_X = 30, COPY_FAR_Y = 11;    // …and at most this far from the text it copies
+  const COPY_GAP_X = 20, COPY_GAP_Y = 6;     // and this far from another recent copy
+  const TYPE_RECENT = 2500;              // ms: someone typed this recently, they are typing "now"
+  const CROWD_W = 40, CROWD_H = 12;      // humans typing this close (cells) to each other form a crowd
+  const CROWD_GROW = .75, CROWD_MAX = 3.2;   // each extra human typing nearby widens the decay radius by this much (×), up to this
+  const BLAST_AT = 70;                   // charge for a shock wave: each keystroke in a crowd of n adds n - 1
+  const CHARGE_LEAK = 4;                 // charge lost per second
+  const BLAST_COOL = 12000;              // ms before the same crowd can blow again
+  const BLAST_R = 950;                   // world px reached by a shock wave from two humans (bigger with more)
+  const BLAST_MS = 3600;                 // ms the wave takes to get there
   const TRACE_LIFE = 30 * 60 * 1000;     // ms an absent person's trace stays visible
   let bots = {};                         // persona -> { id, k, pieces }, mirrored from the database
   let swarm = {};                        // drone index -> { id, k, pieces, kind }, mirrored too
@@ -381,7 +399,11 @@ const FIREBASE_CONFIG = {
     links = [];
     for (let i = 0; i < people.length; i++) for (let j = i + 1; j < people.length; j++) {
       const a = people[i], b = people[j];
-      if (Math.abs(wdelta(a.x - b.x, COLS)) <= LINK_W && Math.abs(wdelta(a.y - b.y, ROWS)) <= LINK_H) links.push({ a, b });
+      if (Math.abs(wdelta(a.x - b.x, COLS)) > LINK_W || Math.abs(wdelta(a.y - b.y, ROWS)) > LINK_H) continue;
+      // the pressure building between them makes the pulse run faster
+      let charge = 0;
+      for (const c of charges) if (Math.abs(wdelta(c.x - a.x, COLS)) <= CROWD_W && Math.abs(wdelta(c.y - a.y, ROWS)) <= CROWD_H) charge = Math.max(charge, c.v / BLAST_AT);
+      links.push({ a, b, charge: Math.min(1, charge) });
     }
   }
 
@@ -391,17 +413,82 @@ const FIREBASE_CONFIG = {
   //      shrinks with it. Every browser sees the same keystrokes, so every browser watches it die.
   const decay = new Map();     // key -> 0..1
   const dying = new Map();     // key -> time its fading starts
+  const clearings = [];        // { x, y, t } where machine text died, so the drones know where to come back
+  // ---- Crowds. Humans typing at the same time close to each other kill the machine text much
+  //      further around them, and if they keep at it together, the pressure builds into a shock wave.
+  let testing = false;         // a test is running (see the test button): nothing goes to the database
+  const typing = new Map();    // human id -> { x, y, t } of their last keystroke
+  const charges = [];          // { x, y, v, t, cool } pressure building where a crowd types
+  const blasts = [];           // shock waves going out
+  function crowdAt(x, y, now) {
+    const out = [];
+    for (const [id, p] of typing) {
+      if (now - p.t > TYPE_RECENT) { typing.delete(id); continue; }
+      if (Math.abs(wdelta(p.x - x, COLS)) <= CROWD_W && Math.abs(wdelta(p.y - y, ROWS)) <= CROWD_H) out.push(p);
+    }
+    return out;
+  }
+  function charge(x, y, crowd, now) {
+    // the middle of the crowd
+    let mx = 0, my = 0;
+    for (const p of crowd) { mx += wdelta(p.x - x, COLS); my += wdelta(p.y - y, ROWS); }
+    const cx = mod(Math.round(x + mx / crowd.length), COLS), cy = mod(Math.round(y + my / crowd.length), ROWS);
+    let c = charges.find(c => Math.abs(wdelta(c.x - cx, COLS)) <= CROWD_W && Math.abs(wdelta(c.y - cy, ROWS)) <= CROWD_H);
+    if (!c) { c = { x: cx, y: cy, v: 0, t: now, cool: 0 }; charges.push(c); }
+    c.x = cx; c.y = cy; c.t = now;
+    if (now < c.cool) return;
+    c.v += crowd.length - 1;
+    if (c.v >= BLAST_AT) { c.v = 0; c.cool = now + BLAST_COOL; blast(cx, cy, crowd.length, now); }
+  }
+  function blast(x, y, n, now) {
+    const R = BLAST_R * (1 + .3 * (n - 2));
+    const rx = Math.ceil(R / CW), ry = Math.ceil(R / CH), list = [];
+    for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+      const d = Math.hypot(dx * CW, dy * CH);
+      if (d > R) continue;
+      const key = keyOf(x + dx, y + dy), v = cells.get(key);
+      if (v && !isHuman(v)) list.push({ key, d });
+    }
+    list.sort((a, b) => a.d - b.d);
+    blasts.push({ x, y, R, t0: now, list, i: 0 });
+    blastSound(x, y);
+    if (mode === 'map' && cvs.animate) cvs.animate([{ transform: 'translate(0,0)' }, { transform: 'translate(-6px,3px)' }, { transform: 'translate(5px,-4px)' }, { transform: 'translate(-3px,2px)' }, { transform: 'translate(0,0)' }], { duration: 420, easing: 'ease-out' });
+  }
+  function stepBlasts(dt, now) {
+    for (let i = charges.length - 1; i >= 0; i--) {
+      const c = charges[i];
+      c.v = Math.max(0, c.v - CHARGE_LEAK * dt);
+      if (!c.v && now - c.t > 6000 && now > c.cool) charges.splice(i, 1);
+    }
+    for (let i = blasts.length - 1; i >= 0; i--) {
+      const b = blasts[i], u = Math.min(1, (now - b.t0) / BLAST_MS), r = b.R * (1 - (1 - u) ** 1.3);
+      // every machine letter the wave front passes dies at once
+      while (b.i < b.list.length && b.list[b.i].d <= r) {
+        const { key } = b.list[b.i++], v = cells.get(key);
+        if (v && !isHuman(v) && !dying.has(key)) { decay.set(key, 1); dying.set(key, now - DECAY_FADE * .5 + rand(0, 250)); }
+      }
+      if (now - b.t0 > BLAST_MS + 700) blasts.splice(i, 1);
+      dirty = true;
+    }
+  }
   function disturb(x, y, owner) {
+    const now = performance.now();
+    typing.set(owner, { x, y, t: now });
+    const crowd = crowdAt(x, y, now);
+    if (crowd.length >= 2) charge(x, y, crowd, now);
+    // more humans typing here: the dying reaches further
+    const f = Math.min(CROWD_MAX, 1 + CROWD_GROW * (crowd.length - 1));
+    const RX = Math.round(DECAY_RX * f), RY = Math.round(DECAY_RY * f);
     // a window around the keystroke: the writer's own letters are the seeds (distance 0),
     // then a two-pass chamfer spreads the (elliptic) distance to every cell of the window
-    const W = 2 * (AREA_X + DECAY_RX) + 1, H = 2 * (AREA_Y + DECAY_RY) + 1;
-    const x0 = x - AREA_X - DECAY_RX, y0 = y - AREA_Y - DECAY_RY;
-    const ax = 1 / (DECAY_RX + 1), ay = 1 / (DECAY_RY + 1), ad = Math.hypot(ax, ay);
+    const W = 2 * (AREA_X + RX) + 1, H = 2 * (AREA_Y + RY) + 1;
+    const x0 = x - AREA_X - RX, y0 = y - AREA_Y - RY;
+    const ax = 1 / (RX + 1), ay = 1 / (RY + 1), ad = Math.hypot(ax, ay);
     const dist = new Float32Array(W * H).fill(9);
     let seeds = 0;
     for (let dy = -AREA_Y; dy <= AREA_Y; dy++) for (let dx = -AREA_X; dx <= AREA_X; dx++) {
       const v = cells.get(keyOf(x + dx, y + dy));
-      if (v && v.o === owner) { dist[(dy + AREA_Y + DECAY_RY) * W + dx + AREA_X + DECAY_RX] = 0; seeds++; }
+      if (v && v.o === owner) { dist[(dy + AREA_Y + RY) * W + dx + AREA_X + RX] = 0; seeds++; }
     }
     if (!seeds) return;
     for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
@@ -454,6 +541,10 @@ const FIREBASE_CONFIG = {
       if (!v || isHuman(v)) continue;
       deathSound(key);
       cellDel(key);
+      // during a test nothing leaves this browser
+      if (testing) continue;
+      clearings.push({ x: key % COLS, y: (key / COLS) | 0, t: now });
+      if (clearings.length > 400) clearings.splice(0, clearings.length - 400);
       if (db) ref(`cells/${key % COLS}_${(key / COLS) | 0}`).remove().catch(() => {});
     }
     if (decay.size) dirty = true;
@@ -653,11 +744,13 @@ const FIREBASE_CONFIG = {
       const o = toScreen(ax * P / CW, ay * P / CH), ps = Math.max(1, P * z);
       for (let i = 0; i <= n; i++) {
         const px = ax + Math.round((bx - ax) * i / n), py = ay + Math.round((by - ay) * i / n), u = n ? i / n : 0;
-        const pulse = mod(i - now / 40, 28) < 3;
+        const pulse = mod(i - now / (40 - 25 * l.charge), 28 - 20 * l.charge) < 3;
         ctx.fillStyle = pulse ? '#fff' : `rgb(${ka.map((v, j) => Math.round(v + (kb[j] - v) * u)).join(',')})`;
         ctx.fillRect(Math.floor(o.x + (px - ax) * ps), Math.floor(o.y + (py - ay) * ps), Math.ceil(ps), Math.ceil(ps));
       }
     }
+
+    drawBlasts(now, z);
 
     // cursors: everyone looks the same, the machines too. Hidden when zoomed far out.
     if (z >= .4) {
@@ -665,6 +758,28 @@ const FIREBASE_CONFIG = {
       if (live) drawCursor(caret.x, caret.y, me.color, !focused || blink === 0);
     }
     placeTextarea();
+  }
+  // shock waves: a ring of big pixels going out, white with a pink echo behind, fading as it goes
+  function drawBlasts(now, z) {
+    const P = 6, ps = Math.max(1, P * z);
+    for (const b of blasts) {
+      const u = Math.min(1, (now - b.t0) / BLAST_MS), r = b.R * (1 - (1 - u) ** 1.3);
+      const c = toScreen(b.x + .5, b.y + .5);
+      if (u < .12) { ctx.fillStyle = `rgba(255,255,255,${.35 * (1 - u / .12)})`; ctx.fillRect(0, 0, vw, vh); }
+      const rings = [[r, '#fff', 1 - u * .7], [r - P, '#fff', 1 - u * .7], [r * .9, '#f6cef6', (1 - u) * .8], [r * .9 - P, '#f6cef6', (1 - u) * .8], [r * .78, '#fff', (1 - u) * .35]];
+      for (const [rr, col, a] of rings) {
+        if (rr < P || a <= 0) continue;
+        ctx.fillStyle = col; ctx.globalAlpha = a;
+        const N = Math.ceil(TAU * rr / P);
+        for (let i = 0; i < N; i++) {
+          if (Math.random() < u * .3) continue;   // breaking up as it spreads
+          const ang = i / N * TAU;
+          const px = Math.round(Math.cos(ang) * rr / P), py = Math.round(Math.sin(ang) * rr / P);
+          ctx.fillRect(Math.floor(c.x + px * ps), Math.floor(c.y + py * ps), Math.ceil(ps), Math.ceil(ps));
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
   }
   function drawTraces(z) {
     const t = serverNow();
@@ -898,6 +1013,22 @@ const FIREBASE_CONFIG = {
     if (pan) { pan.pan.value = clamp(nx * .8, -1, 1); pan.connect(master); }
     o.connect(og); og.connect(out); src.connect(lp); lp.connect(ng); ng.connect(out);
     o.start(t); o.stop(t + .32); src.start(t); src.stop(t + .2);
+  }
+  // a shock wave: a low thump falling away, with a long rush of noise
+  function blastSound(x, y) {
+    if (!actx || !soundOn || mode !== 'map' || document.hidden) return;
+    const p = toScreen(x + .5, y + .5), nx = clamp((p.x - vw / 2) / (vw / 2), -1, 1);
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), og = actx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(28, t + 1.4);
+    og.gain.setValueAtTime(.0001, t); og.gain.exponentialRampToValueAtTime(.7, t + .03); og.gain.exponentialRampToValueAtTime(.0005, t + 1.6);
+    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; src.playbackRate.value = .5;
+    const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(120, t + 2.2);
+    const ng = actx.createGain(); ng.gain.setValueAtTime(.0001, t); ng.gain.exponentialRampToValueAtTime(.35, t + .05); ng.gain.exponentialRampToValueAtTime(.0005, t + 2.4);
+    const pan = actx.createStereoPanner ? actx.createStereoPanner() : null, out = pan || master;
+    if (pan) { pan.pan.value = nx * .6; pan.connect(master); }
+    o.connect(og); og.connect(out); src.connect(lp); lp.connect(ng); ng.connect(out);
+    o.start(t); o.stop(t + 1.7); src.start(t); src.stop(t + 2.5);
   }
   function keySound(key, who, erase) {
     if (!actx || !soundOn || mode !== 'map' || document.hidden || clicks > 5) return;
@@ -1407,6 +1538,115 @@ const FIREBASE_CONFIG = {
     keySound(keyOf(x, y), w.id, false);
     if (db) ref('').update(updates).catch(() => {});
   }
+  // ---- Failed copies. Where human writing has killed the machine text, the drones come back and
+  //      try to copy the human text next to it: letters dropped, swapped or doubled, look-alike
+  //      characters, words skipped or repeated, a marketing word slipped in. Recognisable, and wrong.
+  function nearestHuman(cx, cy) {
+    let best = null, bd = Infinity;
+    for (let dy = -AREA_Y; dy <= AREA_Y; dy++) for (let dx = -AREA_X; dx <= AREA_X; dx++) {
+      const v = cells.get(keyOf(cx + dx, cy + dy));
+      if (!isHuman(v) || v.c === ' ' || v.o.startsWith('test-')) continue;
+      const d = (dx / (AREA_X + 1)) ** 2 + (dy / (AREA_Y + 1)) ** 2;
+      if (d < bd) { bd = d; best = { x: mod(cx + dx, COLS), y: mod(cy + dy, ROWS), o: v.o }; }
+    }
+    return best;
+  }
+  // the human text around one of its letters: the lines of that writer, a few above and below
+  function humanLines(h) {
+    const mine = (x, y) => { const v = cells.get(keyOf(x, y)); return v && v.o === h.o; };
+    let s = h.x, e = h.x;
+    while (h.x - s < 60 && (mine(s - 1, h.y) || mine(s - 2, h.y))) s--;
+    while (e - h.x < 60 && (mine(e + 1, h.y) || mine(e + 2, h.y))) e++;
+    const lines = [];
+    for (let y = h.y - 3; y <= h.y + 3; y++) {
+      let l = '';
+      for (let x = s; x <= e; x++) l += mine(x, y) ? charAt(x, y) : ' ';
+      if (l.trim()) lines.push(l.trim().replace(/\s+/g, ' '));
+    }
+    return lines;
+  }
+  const LOOK = { a: '@', e: '3', i: '1', l: '1', o: '0', s: '5', t: '7', b: '8', g: '9', z: '2' };
+  const KEYS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+  const neighbour = ch => {
+    const lo = ch.toLowerCase();
+    for (const row of KEYS) { const i = row.indexOf(lo); if (i >= 0) return row[clamp(i + (Math.random() < .5 ? -1 : 1), 0, row.length - 1)]; }
+    return ch;
+  };
+  function botch(lines) {
+    const p = rand(.12, .3);   // how badly this copy goes
+    return lines.map(line => {
+      const out = [];
+      for (let word of line.split(' ')) {
+        const r = Math.random();
+        if (r < p * .25) continue;                                    // skipped
+        if (r < p * .45) { out.push(pick(FILLER)); continue; }        // replaced by filler
+        word = [...word].map(ch => {
+          const q = Math.random();
+          if (!/[a-zà-ÿ]/i.test(ch) || q > p * .8) return ch;
+          if (q < p * .2) return '';                                    // dropped
+          if (q < p * .4) return ch + ch;                               // doubled
+          if (q < p * .6 && LOOK[ch.toLowerCase()]) return LOOK[ch.toLowerCase()];
+          return neighbour(ch);                                         // wrong key
+        }).join('');
+        if (word.length > 2 && Math.random() < p * .5) { const i = (Math.random() * (word.length - 1)) | 0; word = word.slice(0, i) + word[i + 1] + word[i] + word.slice(i + 2); }
+        out.push(word);
+        if (Math.random() < p * .3) out.push(word);                   // stutter
+      }
+      if (Math.random() < p * .4) out.push(pick(['!!', '✓', '#ad', '...', '(copy)', '™']));
+      return out.join(' ').toLowerCase();
+    }).filter(l => l.trim());
+  }
+  // a recent clearing that still has human text next to it, with the botched copy to write there:
+  // a few words only, scattered at a distance from the human text, never two copies side by side
+  const copies = [];           // { x, y, t } recent copies (host only)
+  function copyJob() {
+    const now = performance.now();
+    while (clearings.length && now - clearings[0].t > CLEARING_LIFE) clearings.shift();
+    while (copies.length && now - copies[0].t > CLEARING_LIFE) copies.shift();
+    for (let tries = 0; tries < 6 && clearings.length; tries++) {
+      const i = (Math.random() * clearings.length) | 0, c = clearings[i];
+      const h = nearestHuman(c.x, c.y);
+      if (!h) { clearings.splice(i, 1); continue; }
+      const src = humanLines(h).filter(l => l.length > 3);
+      if (!src.length) { clearings.splice(i, 1); continue; }
+      const words = pick(src).split(' '), n = Math.min(words.length, 2 + ((Math.random() * 4) | 0)), at = (Math.random() * (words.length - n + 1)) | 0;
+      const line = botch([words.slice(at, at + n).join(' ')])[0];
+      if (!line) continue;
+      const w = Math.min(34, [...line].length);
+      const ok = (x, y) => {
+        if (copies.some(p => Math.abs(wdelta(p.x - x, COLS)) < COPY_GAP_X && Math.abs(wdelta(p.y - y, ROWS)) < COPY_GAP_Y)) return false;
+        if (!free(x, y, w, 1)) return false;
+        for (let j = -COPY_NEAR_Y; j <= COPY_NEAR_Y; j++) for (let k = -COPY_NEAR_X; k <= w + COPY_NEAR_X; k++) if (isHuman(cells.get(keyOf(x + k, y + j)))) return false;
+        return true;
+      };
+      for (let m = 0; m < 40; m++) {
+        // somewhere on a ring around the human letter, between near and far
+        const a = Math.random() * TAU, d = rand(.45, 1);
+        const x = Math.round(h.x + Math.cos(a) * COPY_FAR_X * d - w / 2), y = Math.round(h.y + Math.sin(a) * COPY_FAR_Y * d);
+        if (ok(x, y)) {
+          clearings.splice(i, 1);
+          copies.push({ x, y, t: now });
+          return { x: mod(x, COLS), y: mod(y, ROWS), lines: [[...line].slice(0, w).join('')], w, h: 1 };
+        }
+      }
+      clearings.splice(i, 1);
+    }
+    return null;
+  }
+  // copying is slower than posting: one letter at a time, looking back at the original now and then
+  async function typeCopy(w, job, ok) {
+    for (let j = 0; j < job.lines.length; j++) {
+      let cx = job.x;
+      for (const ch of job.lines[j]) {
+        if (!ok()) return;
+        const key = keyOf(cx, job.y + j);
+        if (ch !== ' ' && !isHuman(cells.get(key))) putWord(w, cx, job.y + j, ch);
+        cx++; moveTo(w, cx, job.y + j);
+        await sleep(ch === ' ' ? rand(200, 500) : Math.random() < .08 ? rand(600, 1400) : rand(90, 220));
+      }
+      await sleep(rand(400, 1000)); moveTo(w, job.x, job.y + j + 1);
+    }
+  }
   async function droneLoop(d, on) {
     while (on()) {
       try {
@@ -1427,6 +1667,16 @@ const FIREBASE_CONFIG = {
           }
           updates[`swarm/${d}/pieces/${pid}`] = null;
           if (db) await ref('').update(updates).catch(() => {});
+        }
+        // a clearing next to human text: go and try to copy it
+        const job = Math.random() < COPY_CHANCE ? copyJob() : null;
+        if (job) {
+          moveTo(w, job.x, job.y); await sleep(rand(500, 1200));
+          if (!ok()) continue;
+          ref(`swarm/${d}/pieces`).push({ x: job.x, y: job.y, w: job.w, h: job.h, t: serverNow() }).catch(() => {});
+          await typeCopy(w, job, ok);
+          await sleep(rand(1500, 5000));
+          continue;
         }
         const near = somewhere(w.id);
         const lines = droneText(b.kind, near ? near.context : '');
@@ -1752,6 +2002,7 @@ const FIREBASE_CONFIG = {
       drawPlanet(t);
     } else {
       stepDecay(dt, t);
+      stepBlasts(dt, t);
       stepReveal(t);
       // the machine text keeps crawling
       if (t - crawlAt > 120) { crawlAt = t; dirty = true; }
@@ -1765,6 +2016,60 @@ const FIREBASE_CONFIG = {
   setGlobeButton();
   requestAnimationFrame(frame);
   connect();
+
+  // ---- Test: three fake humans arrive one after the other next to the middle of the screen and
+  //      type together, so the widening decay and the shock wave can be seen alone. Nothing they
+  //      write, and nothing that dies, is sent to the database; leaving the test clears their text.
+  let testEnd = 0;
+  const ghosts = [];
+  const GHOST_TEXT = ['i am not a bot, i promise', 'we were here before the noise', 'nobody reads this but you', 'typing slowly, thinking',
+    'is anyone else awake?', 'my hands are cold tonight', 'the sea keeps eating the words', 'hello? hello?', 'i forgot what i wanted to say',
+    'this line is mine', 'robots do not get tired', 'we could build a town here'];
+  const testBtn = $('testBtn');
+  async function ghostLoop(i, cx, cy) {
+    const g = { id: 'test-' + randId(), k: randColor(), keys: new Set() };
+    ghosts.push(g);
+    await sleep(i * 3500);
+    const sx = cx + [-16, 10, -6][i], sy = cy + [-3, 2, 7][i];
+    let x = sx, y = sy;
+    while (testing && performance.now() < testEnd) {
+      // back on a line already written: clear it first
+      for (let k = 0; k < 40; k++) { const key = keyOf(sx + k, y), v = cells.get(key); if (v && v.o === g.id) cellDel(key); }
+      for (const ch of pick(GHOST_TEXT)) {
+        if (!testing) return;
+        const key = keyOf(x, y), v = cells.get(key);
+        if (ch !== ' ' && !(isHuman(v) && v.o !== g.id)) {
+          cellSet(key, { c: ch, k: g.k, o: g.id }); g.keys.add(key);
+          keySound(key, g.id, false); disturb(mod(x, COLS), mod(y, ROWS), g.id);
+        }
+        x++; cursors.set(g.id, { x: mod(x, COLS), y: mod(y, ROWS), k: g.k }); dirty = true;
+        await sleep(ch === ' ' ? rand(120, 300) : rand(70, 170));
+      }
+      x = sx; y++;
+      if (y > sy + 4) y = sy;
+      await sleep(rand(300, 800));
+    }
+    if (testing && performance.now() >= testEnd) stopTest();
+  }
+  function startTest() {
+    if (testing) return;
+    testing = true; testEnd = performance.now() + 32000;
+    testBtn.textContent = 'stop test'; testBtn.classList.add('on');
+    const cx = Math.floor((cam.x + vw / cam.z / 2) / CW), cy = Math.floor((cam.y + vh / cam.z / 2) / CH);
+    for (let i = 0; i < 3; i++) ghostLoop(i, cx, cy);
+  }
+  function stopTest() {
+    if (!testing) return;
+    testing = false;
+    for (const g of ghosts) {
+      for (const key of g.keys) { const v = cells.get(key); if (v && v.o === g.id) cellDel(key); }
+      cursors.delete(g.id); typing.delete(g.id);
+    }
+    ghosts.length = 0; charges.length = 0;
+    testBtn.textContent = 'test'; testBtn.classList.remove('on');
+    dirty = true;
+  }
+  testBtn.addEventListener('click', () => { initAudio(); soundOn = true; testing ? stopTest() : startTest(); testBtn.blur(); });
 
   // ---- "you" appears after a few seconds of doing nothing, and goes away at the next gesture
   const hud = $('hud');
