@@ -257,7 +257,35 @@ const FIREBASE_CONFIG = {
       }
     }
     stale.push({ x0: fx - r, y0: fy - r, x1: fx + r, y1: fy + r });
-    if (stale.length > 24) stale = [{ x0: 0, y0: 0, x1: FW - 1, y1: FH - 1 }];
+    if (stale.length > 24) mergeStale();
+  }
+  // too many boxes: join the two whose union grows the least (rather than redrawing the whole world)
+  function mergeStale() {
+    let best = Infinity, bi = 0, bj = 1;
+    const area = b => (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1);
+    for (let i = 0; i < stale.length; i++) for (let j = i + 1; j < stale.length; j++) {
+      const a = stale[i], b = stale[j];
+      const X = Math.round(((a.x0 + a.x1) - (b.x0 + b.x1)) / 2 / FW) * FW, Y = Math.round(((a.y0 + a.y1) - (b.y0 + b.y1)) / 2 / FH) * FH;
+      const u = (Math.max(a.x1, b.x1 + X) - Math.min(a.x0, b.x0 + X) + 1) * (Math.max(a.y1, b.y1 + Y) - Math.min(a.y0, b.y0 + Y) + 1);
+      const c = u - area(a) - area(b);
+      if (c < best) { best = c; bi = i; bj = j; }
+    }
+    const a = stale[bi], b = stale[bj];
+    const X = Math.round(((a.x0 + a.x1) - (b.x0 + b.x1)) / 2 / FW) * FW, Y = Math.round(((a.y0 + a.y1) - (b.y0 + b.y1)) / 2 / FH) * FH;
+    stale[bi] = { x0: Math.min(a.x0, b.x0 + X), y0: Math.min(a.y0, b.y0 + Y), x1: Math.max(a.x1, b.x1 + X), y1: Math.max(a.y1, b.y1 + Y) };
+    stale.splice(bj, 1);
+  }
+  // boxes waiting to be drawn, cut into tiles small enough to draw a few per frame without a hitch
+  const TILE = 160;
+  let tiles = [];
+  function queueTiles() {
+    for (let b of stale) {
+      if (b.x1 - b.x0 >= FW - 1) b = { ...b, x0: 0, x1: FW - 1 };
+      if (b.y1 - b.y0 >= FH - 1) b = { ...b, y0: 0, y1: FH - 1 };
+      for (let y = b.y0; y <= b.y1; y += TILE) for (let x = b.x0; x <= b.x1; x += TILE)
+        tiles.push({ x0: x, y0: y, x1: Math.min(b.x1, x + TILE - 1), y1: Math.min(b.y1, y + TILE - 1) });
+    }
+    stale = [];
   }
   function mass(x, y, s) {
     const fx = fxOf(mod(x, COLS)), fy = fyOf(mod(y, ROWS));
@@ -528,6 +556,8 @@ const FIREBASE_CONFIG = {
     dirty = true;
   }
   function stepDecay(dt, now) {
+    const gone = {};
+    let n = 0;
     for (const [key, d] of decay) {
       if (dying.has(key)) continue;
       const n = d - DECAY_HEAL * dt;
@@ -545,12 +575,20 @@ const FIREBASE_CONFIG = {
       if (testing) continue;
       clearings.push({ x: key % COLS, y: (key / COLS) | 0, t: now });
       if (clearings.length > 400) clearings.splice(0, clearings.length - 400);
-      if (db) ref(`cells/${key % COLS}_${(key / COLS) | 0}`).remove().catch(() => {});
+      gone[`cells/${key % COLS}_${(key / COLS) | 0}`] = null; n++;
     }
+    if (n && db) ref('').update(gone).catch(() => {});
     if (decay.size) dirty = true;
   }
   // a colour drained toward grey
+  const greyCache = new Map();
   const greyed = (k, d) => {
+    const q = Math.round(d * 20), id = k + q;
+    let g = greyCache.get(id);
+    if (!g) { g = greyRaw(k, q / 20); if (greyCache.size > 4000) greyCache.clear(); greyCache.set(id, g); }
+    return g;
+  };
+  const greyRaw = (k, d) => {
     const c = [1, 3, 5].map(j => parseInt(k.slice(j, j + 2), 16)), g = (c[0] + c[1] + c[2]) / 3, a = Math.min(1, d * 1.3);
     return `rgb(${c.map(v => Math.round(v + (g * .6 - v) * a)).join(',')})`;
   };
@@ -774,8 +812,9 @@ const FIREBASE_CONFIG = {
         for (let i = 0; i < N; i++) {
           if (Math.random() < u * .3) continue;   // breaking up as it spreads
           const ang = i / N * TAU;
-          const px = Math.round(Math.cos(ang) * rr / P), py = Math.round(Math.sin(ang) * rr / P);
-          ctx.fillRect(Math.floor(c.x + px * ps), Math.floor(c.y + py * ps), Math.ceil(ps), Math.ceil(ps));
+          const X = Math.floor(c.x + Math.round(Math.cos(ang) * rr / P) * ps), Y = Math.floor(c.y + Math.round(Math.sin(ang) * rr / P) * ps);
+          if (X < -ps || Y < -ps || X > vw || Y > vh) continue;
+          ctx.fillRect(X, Y, Math.ceil(ps), Math.ceil(ps));
         }
       }
       ctx.globalAlpha = 1;
@@ -1987,12 +2026,19 @@ const FIREBASE_CONFIG = {
   setInterval(updateReport, 180);
 
   // ---- Frame
-  let terrainAt = 0, last = performance.now(), crawlAt = 0;
+  let terrainAt = 0, last = performance.now(), crawlAt = 0, renderAt = 0, terrainReady = false;
   function frame(t) {
     const dt = Math.min(.05, (t - last) / 1000); last = t;
     const b = Math.floor(t / 530) % 2;
     if (b !== blink) { blink = b; if (focused || intro) dirty = true; }
-    if (stale.length && t - terrainAt > 120) { const rs = stale; stale = []; terrainAt = t; rs.forEach(redrawTerrain); dirty = true; }
+    if (stale.length && t - terrainAt > 120) { terrainAt = t; queueTiles(); }
+    if (tiles.length) {
+      // a few tiles per frame, the first full draw all at once
+      const t0 = performance.now(), budget = terrainReady ? 6 : 1e9;
+      while (tiles.length && performance.now() - t0 < budget) redrawTerrain(tiles.shift());
+      if (!tiles.length) terrainReady = true;
+      dirty = true;
+    }
     if (trans) stepTrans(t);
     else if (mode === 'planet') {
       if (!pdrag) {
@@ -2006,7 +2052,9 @@ const FIREBASE_CONFIG = {
       stepReveal(t);
       // the machine text keeps crawling
       if (t - crawlAt > 120) { crawlAt = t; dirty = true; }
-      if (dirty) { dirty = false; render(); }
+      // while lots of letters are dying, 30 images a second are enough
+      const busy = blasts.length || dying.size > 40;
+      if (dirty && (!busy || t - renderAt > 32)) { dirty = false; renderAt = t; render(); }
     }
     requestAnimationFrame(frame);
   }
