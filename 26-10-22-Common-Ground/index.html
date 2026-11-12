@@ -2132,7 +2132,7 @@ const FIREBASE_CONFIG = {
     if (qIn.value.trim()) enter();
   });
   // break the answer into lines of at most `w` characters (trailing spaces kept while typing)
-  function wrap(text, w) {
+  function wrapAnswer(text, w) {
     const lines = []; let line = '';
     const words = text.split(' ');
     words.forEach((word, i) => {
@@ -2145,7 +2145,7 @@ const FIREBASE_CONFIG = {
   // the intro: the sea, the answer so far (in my colour) and a blinking block after it
   function drawIntro(z) {
     ctx.fillStyle = OCEAN; ctx.fillRect(0, 0, vw, vh);
-    const lines = wrap(qIn.value, ans.w), cw = CW * z, ch = CH * z;
+    const lines = wrapAnswer(qIn.value, ans.w), cw = CW * z, ch = CH * z;
     ctx.font = `${21 * z}px ${FONT_MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     lines.forEach((line, j) => [...line].forEach((c, i) => {
       if (c === ' ' && !line.slice(i).trim()) return;
@@ -2159,7 +2159,7 @@ const FIREBASE_CONFIG = {
     }
   }
   function enter() {
-    const lines = wrap(qIn.value.replace(/\s+/g, ' ').trim(), ans.w), bw = Math.max(...lines.map(l => l.length)), bh = lines.length;
+    const lines = wrapAnswer(qIn.value.replace(/\s+/g, ' ').trim(), ans.w), bw = Math.max(...lines.map(l => l.length)), bh = lines.length;
     const x0 = ans.x, y0 = ans.y;
     intro = false; live = true; soundOn = true; initAudio();
     $('intro').classList.add('gone'); enterHint.classList.remove('on'); document.body.classList.remove('arriving');
