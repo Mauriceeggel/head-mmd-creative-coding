@@ -12,8 +12,7 @@
 /*
   One full-screen canvas draws the world, bottom to top:
   terrain (grown from the text, tiled so the world wraps around) · written cells · cursors.
-  A second, low-resolution canvas draws the planet view. Everything else (toasts,
-  status report, HUD, intro) is HTML on top.
+  Everything else (toasts, HUD, intro) is HTML on top.
 */
 :root{
   --pink:#f6cef6;
@@ -42,11 +41,10 @@ body{background:var(--ocean); color:var(--paper); font-family:var(--font-mono)}
 #hud.idle .row{opacity:1; transition:opacity 1.2s}
 #zoom{position:fixed; right:16px; bottom:14px; z-index:20; display:flex; gap:6px}
 #zoom button{font:inherit; font-size:20px; width:36px; height:36px; color:var(--paper); background:var(--ink); border:1px solid var(--paper); cursor:pointer; display:grid; place-items:center; padding:0}
-#globe{color:var(--pink)}
 #testBtn{position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:20; font:inherit; font-size:18px; letter-spacing:.08em; text-transform:uppercase;
   color:var(--paper); background:var(--ink); border:1px solid var(--paper); padding:4px 14px; cursor:pointer}
 #testBtn.on{background:var(--paper); color:var(--ink)}
-body.arriving #testBtn, body.planet #testBtn{display:none}
+body.arriving #testBtn{display:none}
 #infoBtn .q{display:grid; place-items:center; width:22px; height:22px; border:2px solid currentColor; border-radius:50%; font-size:18px; line-height:1; padding-top:1px}
 /* About: a text on the sea, in the middle of the screen; a click anywhere outside it closes it */
 #about{position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:16px}
@@ -54,20 +52,7 @@ body.arriving #testBtn, body.planet #testBtn{display:none}
 #about .box{width:min(620px, 100%); max-height:calc(100vh - 32px); overflow:auto; background:rgba(0,0,255,.86); padding:clamp(18px, 4vw, 34px); font-size:clamp(20px, 2.2vw, 26px); line-height:1.2; color:var(--paper)}
 #about p{margin:0 0 .9em}
 #about p:last-child{margin:0}
-body.planet #zin, body.planet #zout{display:none}
 
-/* Planet view */
-#planet{position:fixed; inset:0; width:100%; height:100%; z-index:15; image-rendering:pixelated; image-rendering:crisp-edges; cursor:grab; touch-action:none; background:#04020e}
-#planet[hidden]{display:none}
-#report{position:fixed; z-index:18; right:max(16px, 6vw); top:50%; transform:translateY(-50%); width:min(390px, 38vw);
-  background:var(--ink); border:1.5px solid var(--paper); padding:14px 16px; font-size:17px; line-height:1.3}
-#report[hidden]{display:none}
-#report h2{font-family:var(--font-label); font-weight:400; font-size:28px; letter-spacing:.06em; text-transform:uppercase; margin:0 0 8px; color:var(--pink)}
-#report pre{margin:0; font:inherit; white-space:pre-wrap; word-break:break-all; color:#eee}
-#report .hint{margin:10px 0 0; color:#999; font-size:15px}
-@media (max-width:759px){
-  #report{top:auto; transform:none; left:16px; right:16px; bottom:62px; width:auto; max-height:44vh; overflow:auto; font-size:15px}
-}
 #zoom button:hover{background:#222}
 #zoom button:focus-visible, .pop button:focus-visible, .card button:focus-visible{outline:2px solid var(--pink); outline-offset:2px}
 
@@ -95,13 +80,6 @@ body.arriving #hud, body.arriving #zoom{display:none}
 <canvas id="map" aria-label="Shared map. Click to place your cursor and type."></canvas>
 <textarea id="ta" aria-label="Type on the map" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
 
-<canvas id="planet" hidden aria-label="The planet. Drag to spin it, click a place to go there."></canvas>
-<aside id="report" hidden aria-label="Planet status report">
-  <h2>Planet status</h2>
-  <pre id="reportText"></pre>
-  <p class="hint">Drag to spin · click a place to land there</p>
-</aside>
-
 <div id="toasts" aria-live="polite"></div>
 
 <button id="testBtn" type="button" title="Three fake humans type next to each other (only on your screen)">test</button>
@@ -111,7 +89,6 @@ body.arriving #hud, body.arriving #zoom{display:none}
 <div id="zoom">
   <button id="zin" type="button" aria-label="Zoom in">+</button>
   <button id="zout" type="button" aria-label="Zoom out">−</button>
-  <button id="globe" type="button" aria-label="See the planet"></button>
   <button id="infoBtn" type="button" aria-label="About this project" title="About" aria-expanded="false" aria-controls="about"><span class="q" aria-hidden="true">?</span></button>
 </div>
 
@@ -155,7 +132,8 @@ const FIREBASE_CONFIG = {
   const ZMIN = .6, ZMAX = 3.2;           // you can step back a little, never far
   const ZSTART = 1.8;                    // close enough to read
   const ZBLUR = .8;                      // below this, all text is only a swarm of marks
-  const MACHINE_READ = .4;               // share of machine letters readable at any moment; the rest crawls
+  const CALM_BUG = .002;                 // share of calm machine letters glitching for a moment, here and there
+  const BUG_SPREAD = 1.6;                // decay × this = share of machine letters glitching (typing nearby wakes them)
   const MODEL = 'SmolLM2-360M-Instruct-q4f16_1-MLC', MODEL_F32 = 'SmolLM2-360M-Instruct-q4f32_1-MLC';
   const WEBLLM = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.84/+esm';
   const SEED = 7;
@@ -187,8 +165,6 @@ const FIREBASE_CONFIG = {
   const TRACE_LIFE = 30 * 60 * 1000;     // ms an absent person's trace stays visible
   let bots = {};                         // persona -> { id, k, pieces }, mirrored from the database
   let swarm = {};                        // drone index -> { id, k, pieces, kind }, mirrored too
-  const ICON_GLOBE = '<svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M5 1h6v1h2v1h1v2h1v6h-1v2h-1v1h-2v1H5v-1H3v-1H2v-2H1V5h1V3h1V2h2zm0 2v2H3v2h3V5h4V3zm6 3v3H8v3h2v1h1v-2h2V8h1V6zM3 9v2h1v1h2V9z"/></svg>';
-  const ICON_MAP = '<svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1 2h14v12H1zM2 3v10h3V3zm4 0v10h4V3zm5 0v10h3V3z"/><path fill="currentColor" d="M3 5h1v1H3zm0 2h1v1H3zm4 1h1v1H7zm1 1h1v1H8zm4-3h1v1h-1zm0 4h1v1h-1z"/></svg>';
   const mod = (a, n) => ((a % n) + n) % n;
   const wdelta = (d, n) => d - Math.round(d / n) * n;   // shortest signed distance on a loop of length n
   const keyOf = (x, y) => mod(y, ROWS) * COLS + mod(x, COLS);
@@ -198,7 +174,7 @@ const FIREBASE_CONFIG = {
   //      people write in one place, the further the land spreads. Each patch of land belongs to the
   //      colour of the nearest writing (a territory), and territories are outlined in white.
   const F = 8, FW = WORLD_W / F, FH = WORLD_H / F;   // mass field, 8 world px per value
-  const TS = 4, TW = WORLD_W / TS, TH = WORLD_H / TS; // terrain image, 2 px per field value
+  const TS = 2, TW = WORLD_W / TS, TH = WORLD_H / TS, S = F / TS; // terrain image, S px per field value (thin borders)
   const R = 24;                                       // reach of one letter, in field px (192 world px)
   const T = 4;                                        // mass needed for land: a short word makes an islet
   const DENS = new Float32Array(FW * FH);
@@ -337,15 +313,15 @@ const FIREBASE_CONFIG = {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) OWN[mod(y, FH) * FW + mod(x, FW)] = own[(y - ey0) * ew + (x - ex0)];
 
     // 2. land, at terrain resolution, from the mass field smoothed between field px
-    const tx0 = x0 * 2, ty0 = y0 * 2, tx1 = x1 * 2 + 1, ty1 = y1 * 2 + 1;
+    const tx0 = x0 * S, ty0 = y0 * S, tx1 = x1 * S + S - 1, ty1 = y1 * S + S - 1;
     const lx0 = tx0 - 1, ly0 = ty0 - 1, lx1 = tx1 + 1, ly1 = ty1 + 1;
     const lw = lx1 - lx0 + 1, lh = ly1 - ly0 + 1, land = new Uint8Array(lw * lh);
     const val = i => DENS[i] * NM[i] - T;
     for (let ty = ly0; ty <= ly1; ty++) {
-      const gy = (ty + .5) / 2 - .5, iy = Math.floor(gy), ay = gy - iy;
+      const gy = (ty + .5) / S - .5, iy = Math.floor(gy), ay = gy - iy;
       const ya = mod(iy, FH) * FW, yb = mod(iy + 1, FH) * FW;
       for (let tx = lx0; tx <= lx1; tx++) {
-        const gx = (tx + .5) / 2 - .5, ix = Math.floor(gx), ax = gx - ix;
+        const gx = (tx + .5) / S - .5, ix = Math.floor(gx), ax = gx - ix;
         const xa = mod(ix, FW), xb = mod(ix + 1, FW);
         const v = (val(ya + xa) * (1 - ax) + val(ya + xb) * ax) * (1 - ay) + (val(yb + xa) * (1 - ax) + val(yb + xb) * ax) * ay;
         if (v > 0) land[(ty - ly0) * lw + (tx - lx0)] = 1;
@@ -355,7 +331,7 @@ const FIREBASE_CONFIG = {
     // 3. paint: blue sea, black land tinted by its territory, white coasts and borders
     const d = timg.data;
     const L = (tx, ty) => land[(ty - ly0) * lw + (tx - lx0)];
-    const ownAt = (tx, ty) => OWN[mod(Math.floor(ty / 2), FH) * FW + mod(Math.floor(tx / 2), FW)];
+    const ownAt = (tx, ty) => OWN[mod(Math.floor(ty / S), FH) * FW + mod(Math.floor(tx / S), FW)];
     for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
       const o = (mod(ty, TH) * TW + mod(tx, TW)) * 4;
       let r = 0, g = 0, b = 255;
@@ -364,9 +340,9 @@ const FIREBASE_CONFIG = {
         const coast = !L(tx - 1, ty) || !L(tx + 1, ty) || !L(tx, ty - 1) || !L(tx, ty + 1);
         const orr = ownAt(tx + 1, ty), od = ownAt(tx, ty + 1);
         const border = (orr !== ow && orr >= 0 && L(tx + 1, ty)) || (od !== ow && od >= 0 && L(tx, ty + 1));
-        if (coast || border) { r = g = b = 255; }
-        else if (ow >= 0) { const c = COLORS[ow]; r = c[0] * .16; g = c[1] * .16; b = c[2] * .16; }
-        else { b = 0; }
+        if (coast || border) { r = g = b = 225; }
+        else if (ow >= 0) { const c = COLORS[ow]; r = 34 + c[0] * .3; g = 34 + c[1] * .3; b = 34 + c[2] * .3; }
+        else { r = g = 34; b = 40; }
       }
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }
@@ -480,7 +456,7 @@ const FIREBASE_CONFIG = {
     list.sort((a, b) => a.d - b.d);
     blasts.push({ x, y, R, t0: now, list, i: 0 });
     blastSound(x, y);
-    if (mode === 'map' && cvs.animate) cvs.animate([{ transform: 'translate(0,0)' }, { transform: 'translate(-6px,3px)' }, { transform: 'translate(5px,-4px)' }, { transform: 'translate(-3px,2px)' }, { transform: 'translate(0,0)' }], { duration: 420, easing: 'ease-out' });
+    if (cvs.animate) cvs.animate([{ transform: 'translate(0,0)' }, { transform: 'translate(-6px,3px)' }, { transform: 'translate(5px,-4px)' }, { transform: 'translate(-3px,2px)' }, { transform: 'translate(0,0)' }], { duration: 420, easing: 'ease-out' });
   }
   function stepBlasts(dt, now) {
     for (let i = charges.length - 1; i >= 0; i--) {
@@ -730,7 +706,8 @@ const FIREBASE_CONFIG = {
     }
     ctx.font = `${21 * z}px ${FONT_MONO}`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const tick = now / 380;
+    const tick = now / 380, bo = .35 * z;   // bo: letters drawn twice, a hair apart, a little bolder
+    const ft = (t, x, y) => { ctx.fillText(t, x, y); ctx.fillText(t, x + bo, y); };
     for (let i = 0; i < visible.length; i += 5) {
       const x = visible[i], y = visible[i + 1], key = keyOf(x, y), h = hash(key, 1);
       let sx = (x * CW - cam.x) * z, sy = (y * CH - cam.y) * z;
@@ -741,21 +718,25 @@ const FIREBASE_CONFIG = {
         sx += (hash(key, Math.floor(now / 70)) - .5) * d * 5 * z;
         sy += (hash(key + 7, Math.floor(now / 70)) - .5) * d * 3 * z;
       }
+      // machine text is calm: only a few letters glitch for a moment, and more of them the more
+      // the humans around type (decay)
+      const bug = !human && (h < d * BUG_SPREAD || hash(key, Math.floor(now / 700 + h * 7)) < CALM_BUG);
       if (far) {
-        // further out, only small marks that shuffle about, like ants (human text keeps still)
-        const g = human ? h : hash(key, Math.floor(tick + h * 9));
+        // further out, only small marks; the glitching ones shuffle about, like ants
+        const g = bug ? hash(key, Math.floor(tick + h * 9)) : h;
         ctx.globalAlpha = .75 * fade;
         ctx.fillRect(sx + cw * (.1 + g * .25), sy + ch * (.3 + (g * 7 % 1) * .25), cw * (.35 + h * .4), ch * .28);
         continue;
       }
       // human text is always clear
-      if (human) { ctx.globalAlpha = 1; ctx.fillText(visible[i + 2], sx + cw / 2, sy + ch / 2 + z); continue; }
-      // machine text: some letters readable, the rest keeps turning into other glyphs, faster as it decays
+      if (human) { ctx.globalAlpha = 1; ft(visible[i + 2], sx + cw / 2, sy + ch / 2 + z); continue; }
+      // machine text: calm and readable, except the glitching letters, which keep turning into
+      // other glyphs, faster as they decay
       ctx.globalAlpha = fade;
-      if (h < MACHINE_READ * (1 - d)) { ctx.fillText(visible[i + 2], sx + cw / 2, sy + ch / 2 + z); continue; }
+      if (!bug) { ft(visible[i + 2], sx + cw / 2, sy + ch / 2 + z); continue; }
       const g = hash(key, Math.floor(tick * (1 + d * 4) + h * 9));
-      ctx.globalAlpha = (.6 - d * .25) * fade;
-      ctx.fillText(GLYPHS[(g * GLYPHS.length) | 0], sx + cw / 2, sy + ch / 2 + z);
+      ctx.globalAlpha = (.75 - d * .3) * fade;
+      ft(GLYPHS[(g * GLYPHS.length) | 0], sx + cw / 2, sy + ch / 2 + z);
     }
     ctx.globalAlpha = 1;
 
@@ -1032,7 +1013,7 @@ const FIREBASE_CONFIG = {
   let deaths = 0;
   setInterval(() => { deaths = 0; }, 60);
   function deathSound(key) {
-    if (!actx || !soundOn || mode !== 'map' || document.hidden || deaths > 2) return;
+    if (!actx || !soundOn || document.hidden || deaths > 2) return;
     const p = toScreen(key % COLS + .5, ((key / COLS) | 0) + .5);
     const nx = (p.x - vw / 2) / (vw / 2), ny = (p.y - vh / 2) / (vh / 2);
     if (Math.abs(nx) > 1 || Math.abs(ny) > 1) return;
@@ -1055,7 +1036,7 @@ const FIREBASE_CONFIG = {
   }
   // a shock wave: a low thump falling away, with a long rush of noise
   function blastSound(x, y) {
-    if (!actx || !soundOn || mode !== 'map' || document.hidden) return;
+    if (!actx || !soundOn || document.hidden) return;
     const p = toScreen(x + .5, y + .5), nx = clamp((p.x - vw / 2) / (vw / 2), -1, 1);
     const t = actx.currentTime;
     const o = actx.createOscillator(), og = actx.createGain();
@@ -1070,7 +1051,7 @@ const FIREBASE_CONFIG = {
     o.start(t); o.stop(t + 1.7); src.start(t); src.stop(t + 2.5);
   }
   function keySound(key, who, erase) {
-    if (!actx || !soundOn || mode !== 'map' || document.hidden || clicks > 5) return;
+    if (!actx || !soundOn || document.hidden || clicks > 5) return;
     const p = toScreen(key % COLS + .5, ((key / COLS) | 0) + .5);
     const nx = (p.x - vw / 2) / (vw / 2), ny = (p.y - vh / 2) / (vh / 2);
     if (Math.abs(nx) > 1 || Math.abs(ny) > 1) return;
@@ -1802,228 +1783,6 @@ const FIREBASE_CONFIG = {
     const end = Math.max(out.lastIndexOf('. '), out.lastIndexOf('! '), out.lastIndexOf('? '), /[.!?]$/.test(out) ? out.length - 1 : -1);
     return end > 30 ? out.slice(0, end + 1) : FALLBACK[p](topic);
   }
-  // ---- Planet view. The globe button zooms all the way out: the map wraps around a small pixel
-  //      planet turning in empty space. Drag to spin it, click a place to land there. Beside it,
-  //      a status report on the planet, garbled by the machine text.
-  const pcv = $('planet'), pctx = pcv.getContext('2d'), reportEl = $('report'), reportText = $('reportText');
-  const PT_W = 256, PT_H = 128;                   // planet texture, from the land and territories
-  const ptex = new Uint8ClampedArray(PT_W * PT_H * 3);
-  let mode = 'map', trans = null;                 // 'map' | 'planet', and a transition in progress
-  let rot = 0, tilt = 0, spin = 0, tiltV = 0, pdrag = null, PX = 3, lw = 0, lh = 0, pimg = null, stars = [];
-  let landShare = 0;
-  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => v / 16 - .5);
-
-  function planetSize() {
-    PX = vw < 700 ? 3 : 4;
-    lw = Math.ceil(vw / PX); lh = Math.ceil(vh / PX);
-    pcv.width = lw; pcv.height = lh;
-    pimg = pctx.createImageData(lw, lh);
-    let st = 99;
-    const rnd = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; };
-    stars = Array.from({ length: Math.round(lw * lh / 260) }, () => ({ x: (rnd() * lw) | 0, y: (rnd() * lh) | 0, b: .3 + rnd() * .7, sp: .6 + rnd() * 2.4, ph: rnd() * 7, big: rnd() < .06 }));
-  }
-  // where the planet sits: left of the report on wide screens, above it on narrow ones
-  function planetBox() {
-    const wide = vw >= 760;
-    return wide ? { cx: lw * .36, cy: lh * .5, r: Math.min(lw * .25, lh * .36) } : { cx: lw * .5, cy: lh * .3, r: Math.min(lw * .38, lh * .2) };
-  }
-  function bakePlanet() {
-    const L = new Uint8Array(PT_W * PT_H), O = new Int16Array(PT_W * PT_H);
-    for (let v = 0; v < PT_H; v++) for (let u = 0; u < PT_W; u++) {
-      const fi = Math.floor((v + .5) / PT_H * FH) * FW + Math.floor((u + .5) / PT_W * FW);
-      L[v * PT_W + u] = DENS[fi] * NM[fi] > T ? 1 : 0; O[v * PT_W + u] = OWN[fi];
-    }
-    for (let v = 0; v < PT_H; v++) for (let u = 0; u < PT_W; u++) {
-      const i = v * PT_W + u, o = i * 3;
-      if (!L[i]) { ptex[o] = 0; ptex[o + 1] = 0; ptex[o + 2] = 255; continue; }
-      const coast = !L[v * PT_W + mod(u + 1, PT_W)] || !L[v * PT_W + mod(u - 1, PT_W)] || !L[mod(v + 1, PT_H) * PT_W + u] || !L[mod(v - 1, PT_H) * PT_W + u];
-      if (coast) { ptex[o] = ptex[o + 1] = ptex[o + 2] = 255; continue; }
-      const c = O[i] >= 0 ? COLORS[O[i]] : [0, 0, 0];
-      ptex[o] = c[0] * .38; ptex[o + 1] = c[1] * .38; ptex[o + 2] = c[2] * .38;
-    }
-    let all = 0;
-    for (let i = 0; i < FW * FH; i += 7) if (DENS[i] * NM[i] > T) all++;
-    landShare = all / (FW * FH / 7);
-  }
-  setInterval(() => { if (mode === 'planet') bakePlanet(); }, 1500);
-
-  function drawPlanet(now, scale = 1) {
-    const d = pimg.data, t = now / 1000;
-    d.fill(0);
-    for (let i = 3; i < d.length; i += 4) { d[i - 3] = 4; d[i - 2] = 2; d[i - 1] = 14; d[i] = 255; }
-    for (const s of stars) {
-      const b = s.b * (.55 + .45 * Math.sin(t * s.sp + s.ph));
-      if (b < .25) continue;
-      const v = Math.round(255 * b), set = (x, y, f) => { if (x < 0 || y < 0 || x >= lw || y >= lh) return; const o = (y * lw + x) * 4; d[o] = v * f; d[o + 1] = v * f * (s.big ? .85 : 1); d[o + 2] = v * f; };
-      set(s.x, s.y, 1);
-      if (s.big && b > .8) { set(s.x - 1, s.y, .5); set(s.x + 1, s.y, .5); set(s.x, s.y - 1, .5); set(s.x, s.y + 1, .5); }
-    }
-    const box = planetBox(), cx = box.cx, cy = box.cy, r = box.r * scale;
-    const ct = Math.cos(tilt), st = Math.sin(tilt);
-    const x0 = Math.max(0, Math.floor(cx - r - 2)), x1 = Math.min(lw - 1, Math.ceil(cx + r + 2));
-    const y0 = Math.max(0, Math.floor(cy - r - 2)), y1 = Math.min(lh - 1, Math.ceil(cy + r + 2));
-    for (let py = y0; py <= y1; py++) for (let px = x0; px <= x1; px++) {
-      const nx = (px + .5 - cx) / r, ny = (py + .5 - cy) / r, d2 = nx * nx + ny * ny, o = (py * lw + px) * 4;
-      if (d2 > 1) {
-        // a one-pixel pink halo, the colour the old globe floated on
-        if (d2 < (1 + 1.6 / r) ** 2) { d[o] = 246; d[o + 1] = 206; d[o + 2] = 246; }
-        continue;
-      }
-      const nz = Math.sqrt(1 - d2);
-      const y2 = ny * ct - nz * st, z2 = ny * st + nz * ct;
-      const lat = Math.asin(clamp(y2, -1, 1)), lon = Math.atan2(nx, z2) + rot;
-      const u = mod(lon / TAU, 1), v = clamp(lat / Math.PI + .5, 0, .9999);
-      const ti = (((v * PT_H) | 0) * PT_W + ((u * PT_W) | 0)) * 3;
-      const R0 = ptex[ti], G0 = ptex[ti + 1], B0 = ptex[ti + 2];
-      // light from the upper left, in four dithered steps
-      const light = clamp(-.45 * nx - .5 * ny + .74 * nz, 0, 1) * .9 + .22;
-      const q = clamp(Math.floor(light * 4 + BAYER[(py & 3) * 4 + (px & 3)] * 1.2) / 4, .25, 1.1);
-      d[o] = R0 * q; d[o + 1] = G0 * q; d[o + 2] = B0 * q;
-    }
-    // everyone's cursor, as a blinking pixel on the side facing us
-    if (scale === 1 && Math.floor(t * 2) % 2 === 0) {
-      const pts = [...cursors.values()];
-      if (live) pts.push({ x: caret.x, y: caret.y, k: me.color });
-      for (const c of pts) {
-        const lat = (c.y / ROWS - .5) * Math.PI, dl = c.x / COLS * TAU - rot;
-        const X = Math.cos(lat) * Math.sin(dl), Y2 = Math.sin(lat), Z2 = Math.cos(lat) * Math.cos(dl);
-        const ny = Y2 * ct + Z2 * st, nz = -Y2 * st + Z2 * ct;
-        if (nz <= .05) continue;
-        const px = Math.floor(cx + X * r), py = Math.floor(cy + ny * r);
-        if (px < 0 || py < 0 || px >= lw || py >= lh) continue;
-        const o = (py * lw + px) * 4, k = [1, 3, 5].map(j => parseInt(c.k.slice(j, j + 2), 16));
-        d[o] = k[0]; d[o + 1] = k[1]; d[o + 2] = k[2];
-      }
-    }
-    pctx.putImageData(pimg, 0, 0);
-  }
-  // screen point -> map cell, or null off the planet
-  function planetPick(sx, sy) {
-    const box = planetBox(), nx = (sx / PX - box.cx) / box.r, ny = (sy / PX - box.cy) / box.r, d2 = nx * nx + ny * ny;
-    if (d2 > 1) return null;
-    const nz = Math.sqrt(1 - d2), ct = Math.cos(tilt), st = Math.sin(tilt);
-    const y2 = ny * ct - nz * st, z2 = ny * st + nz * ct;
-    const lat = Math.asin(clamp(y2, -1, 1)), lon = Math.atan2(nx, z2) + rot;
-    return { x: Math.floor(mod(lon / TAU, 1) * COLS), y: Math.floor(clamp(lat / Math.PI + .5, 0, .9999) * ROWS) };
-  }
-  // the point of the map facing us, and the rotation that faces a point of the map
-  const facing = () => ({ x: Math.floor(mod(rot / TAU, 1) * COLS), y: Math.floor(clamp(-tilt / Math.PI + .5, 0, .9999) * ROWS) });
-  function face(x, y) { rot = x / COLS * TAU; tilt = clamp(-(y / ROWS - .5) * Math.PI, -1.1, 1.1); }
-
-  pcv.addEventListener('pointerdown', e => {
-    if (mode !== 'planet' || trans) return;
-    pcv.setPointerCapture(e.pointerId);
-    pdrag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now(), moved: false };
-    spin = 0; tiltV = 0;
-  });
-  pcv.addEventListener('pointermove', e => {
-    if (!pdrag) { if (mode === 'planet') pcv.style.cursor = planetPick(e.clientX, e.clientY) ? 'pointer' : 'grab'; return; }
-    const r = planetBox().r * PX, dx = e.clientX - pdrag.x, dy = e.clientY - pdrag.y, now = performance.now(), dt = Math.max(8, now - pdrag.t);
-    if (Math.hypot(e.clientX - pdrag.x0, e.clientY - pdrag.y0) > 5) pdrag.moved = true;
-    rot -= dx / r; tilt = clamp(tilt + dy / r, -1.1, 1.1);
-    spin = -dx / r / dt * 1000; tiltV = dy / r / dt * 1000;
-    pdrag.x = e.clientX; pdrag.y = e.clientY; pdrag.t = now;
-    pcv.style.cursor = 'grabbing';
-  });
-  const endPlanetDrag = e => {
-    const d = pdrag; pdrag = null; pcv.style.cursor = 'grab';
-    if (!d || e.type !== 'pointerup') return;
-    if (!d.moved) { const c = planetPick(e.clientX, e.clientY); if (c) leavePlanet(c); }
-    else if (performance.now() - d.t > 80) { spin = 0; tiltV = 0; }
-  };
-  pcv.addEventListener('pointerup', endPlanetDrag);
-  pcv.addEventListener('pointercancel', endPlanetDrag);
-  pcv.addEventListener('wheel', e => { e.preventDefault(); if (mode === 'planet' && !trans && (e.ctrlKey || e.metaKey ? e.deltaY < 0 : false)) leavePlanet(); else if (!(e.ctrlKey || e.metaKey)) { rot += e.deltaX * .003; tilt = clamp(tilt + e.deltaY * .003, -1.1, 1.1); } }, { passive: false });
-
-  // ---- Going there and back. Out: the map shrinks away, the planet arrives. In: the reverse.
-  const TRANS_MS = 1100, ZFAR = .09;
-  const ease = p => p < .5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2;
-  let zBack = 1;
-  function goPlanet() {
-    if (mode !== 'map' || trans) return;
-    sel = null; ta.blur();
-    const c = { x: (cam.x + vw / cam.z / 2) / CW, y: (cam.y + vh / cam.z / 2) / CH };
-    zBack = cam.z; face(c.x, c.y); spin = .12; tiltV = 0;
-    bakePlanet(); planetSize();
-    trans = { dir: 1, t0: performance.now(), c, z0: cam.z };
-    pcv.hidden = false; document.body.classList.add('planet');
-    setGlobeButton();
-  }
-  function leavePlanet(target) {
-    if (mode !== 'planet' || trans) return;
-    const c = target || facing();
-    if (target) face(target.x, target.y);
-    reportEl.hidden = true;
-    trans = { dir: -1, t0: performance.now(), c, z0: zBack };
-    mode = 'map'; document.body.classList.remove('planet');
-    setGlobeButton();
-  }
-  function stepTrans(now) {
-    const p = clamp((now - trans.t0) / TRANS_MS, 0, 1), e = ease(p), k = trans.dir > 0 ? e : 1 - e;
-    // the map's zoom, from where we were down to far away (or back up), around the same point
-    const z = trans.z0 * (ZFAR / trans.z0) ** k;
-    cam.z = z; cam.x = trans.c.x * CW - vw / z / 2; cam.y = trans.c.y * CH - vh / z / 2; wrapCam();
-    render();
-    // the planet fades in over the second half, arriving from very close
-    const a = clamp((k - .45) / .55, 0, 1);
-    pcv.style.opacity = a;
-    if (a > 0) drawPlanet(now, 1 + 5 * (1 - a) ** 2);
-    if (p >= 1) {
-      if (trans.dir > 0) { mode = 'planet'; reportEl.hidden = false; updateReport(); }
-      else { pcv.hidden = true; cam.z = clamp(trans.z0, ZMIN, ZMAX); centerOn(trans.c.x, trans.c.y); if (live) setCaret(trans.c.x, trans.c.y); }
-      trans = null; dirty = true;
-    }
-  }
-  const globeBtn = $('globe');
-  function setGlobeButton() {
-    const toMap = document.body.classList.contains('planet');
-    globeBtn.innerHTML = toMap ? ICON_MAP : ICON_GLOBE;
-    globeBtn.setAttribute('aria-label', toMap ? 'Back to the map' : 'See the planet');
-    globeBtn.title = toMap ? 'Back to the map' : 'See the planet';
-  }
-  // the "?" opens the about text; a click outside the text (or Escape) closes it
-  const about = $('about'), infoBtn = $('infoBtn');
-  function showAbout(on) {
-    about.hidden = !on; infoBtn.setAttribute('aria-expanded', String(on));
-    if (!on && live && mode === 'map') ta.focus({ preventScroll: true });
-  }
-  infoBtn.addEventListener('click', () => showAbout(about.hidden));
-  about.addEventListener('pointerdown', e => { if (!e.target.closest('.box')) { e.preventDefault(); showAbout(false); } });
-  addEventListener('keydown', e => { if (e.key === 'Escape' && !about.hidden) showAbout(false); });
-  globeBtn.addEventListener('click', () => { if (document.body.classList.contains('planet')) leavePlanet(); else goPlanet(); });
-  addEventListener('keydown', e => { if (e.key === 'Escape' && mode === 'planet') leavePlanet(); });
-
-  // ---- The status report, garbled in proportion to how much of the text is machine-made
-  const NOISE = 'ŗāçĕėęǰŷžŝĵĩõũĉǧķļņñœăųįūåǩ░▒▓█#%&@?';
-  const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  function garble(s, p) { return [...s].map(ch => ch !== ' ' && ch !== '.' && Math.random() < p ? pick(NOISE) : ch).join(''); }
-  function updateReport() {
-    if (mode !== 'planet') return;
-    let glyphs = 0, human = 0;
-    const cols = new Set();
-    for (const v of cells.values()) { glyphs++; cols.add(v.k); if (isHuman(v)) human++; }
-    const share = glyphs ? 1 - human / glyphs : 0, rot0 = .03 + share * .22;
-    let people = live ? 1 : 0;
-    for (const id of cursors.keys()) if (!machineIds.has(id)) people++;
-    const bar = '▓'.repeat(Math.round(share * 10)).padEnd(10, '░');
-    const L = [
-      ['surface', `${fmt(COLS)} × ${fmt(ROWS)} cells, no edges`],
-      ['emerged land', `${(landShare * 100).toFixed(1)} %`],
-      ['territories', fmt(cols.size)],
-      ['glyphs', fmt(glyphs)],
-      null,
-      ['humans online', fmt(people)],
-      ['machine writers', fmt(Object.keys(PERSONAS).length + Object.keys(swarm).length)],
-      ['machine text', `${bar} ${(share * 100).toFixed(1)} %`],
-      ['human text', fmt(human) + ' glyphs'],
-      ['decaying', fmt(decay.size) + ' glyphs'],
-    ];
-    const lines = L.map(r => r ? garble(r[0].padEnd(16, '.') + ' ', rot0 * .5) + garble(r[1], rot0) : '─'.repeat(34));
-    let hex = '';
-    for (let j = 0; j < 3; j++) { let h = ''; for (let i = 0; i < 8; i++) h += Math.random() < rot0 * 2 ? '?? ' : ((Math.random() * 256) | 0).toString(16).padStart(2, '0') + ' '; hex += '\n' + garble(h.trim(), rot0); }
-    reportText.textContent = lines.join('\n') + '\n' + '─'.repeat(34) + hex;
-  }
-  setInterval(updateReport, 180);
 
   // ---- Frame
   let terrainAt = 0, last = performance.now(), crawlAt = 0, renderAt = 0, terrainReady = false;
@@ -2039,14 +1798,7 @@ const FIREBASE_CONFIG = {
       if (!tiles.length) terrainReady = true;
       dirty = true;
     }
-    if (trans) stepTrans(t);
-    else if (mode === 'planet') {
-      if (!pdrag) {
-        rot += spin * dt; tilt = clamp(tilt + tiltV * dt, -1.1, 1.1);
-        spin += (.12 - spin) * Math.min(1, dt * .8); tiltV *= Math.max(0, 1 - dt * 2.5);
-      }
-      drawPlanet(t);
-    } else {
+    {
       stepDecay(dt, t);
       stepBlasts(dt, t);
       stepReveal(t);
@@ -2058,10 +1810,7 @@ const FIREBASE_CONFIG = {
     }
     requestAnimationFrame(frame);
   }
-  addEventListener('resize', () => { if (mode === 'planet' || trans) planetSize(); });
   document.fonts.ready.then(() => { dirty = true; });
-  planetSize();
-  setGlobeButton();
   requestAnimationFrame(frame);
   connect();
 
@@ -2199,7 +1948,7 @@ const FIREBASE_CONFIG = {
       if (c === ' ' && !line.slice(i).trim()) return;
       const p = toScreen(ans.x + i, ans.y + j);
       ctx.globalAlpha = .86; ctx.fillStyle = '#000'; ctx.fillRect(p.x, p.y, cw + .6, ch + .6);
-      ctx.globalAlpha = 1; ctx.fillStyle = me.color; ctx.fillText(c, p.x + cw / 2, p.y + ch / 2 + z);
+      ctx.globalAlpha = 1; ctx.fillStyle = me.color; ctx.fillText(c, p.x + cw / 2, p.y + ch / 2 + z); ctx.fillText(c, p.x + cw / 2 + .35 * z, p.y + ch / 2 + z);
     }));
     if (blink === 0) {
       const last = lines[lines.length - 1], p = toScreen(ans.x + last.length, ans.y + lines.length - 1);
