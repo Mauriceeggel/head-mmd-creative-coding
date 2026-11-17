@@ -41,10 +41,6 @@ body{background:var(--ocean); color:var(--paper); font-family:var(--font-mono)}
 #hud.idle .row{opacity:1; transition:opacity 1.2s}
 #zoom{position:fixed; right:16px; bottom:14px; z-index:20; display:flex; gap:6px}
 #zoom button{font:inherit; font-size:20px; width:36px; height:36px; color:var(--paper); background:var(--ink); border:1px solid var(--paper); cursor:pointer; display:grid; place-items:center; padding:0}
-#testBtn{position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:20; font:inherit; font-size:18px; letter-spacing:.08em; text-transform:uppercase;
-  color:var(--paper); background:var(--ink); border:1px solid var(--paper); padding:4px 14px; cursor:pointer}
-#testBtn.on{background:var(--paper); color:var(--ink)}
-body.arriving #testBtn{display:none}
 #infoBtn .q{display:grid; place-items:center; width:22px; height:22px; border:2px solid currentColor; border-radius:50%; font-size:18px; line-height:1; padding-top:1px}
 /* About: a text on the sea, in the middle of the screen; a click anywhere outside it closes it */
 #about{position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:16px}
@@ -82,7 +78,6 @@ body.arriving #hud, body.arriving #zoom{display:none}
 
 <div id="toasts" aria-live="polite"></div>
 
-<button id="testBtn" type="button" title="Three fake humans type next to each other (only on your screen)">test</button>
 <div id="hud">
   <div class="row"><span class="chip"><span id="me"></span><span>you</span></span></div>
 </div>
@@ -420,7 +415,6 @@ const FIREBASE_CONFIG = {
   const clearings = [];        // { x, y, t } where machine text died, so the drones know where to come back
   // ---- Crowds. Humans typing at the same time close to each other kill the machine text much
   //      further around them, and if they keep at it together, the pressure builds into a shock wave.
-  let testing = false;         // a test is running (see the test button): nothing goes to the database
   const typing = new Map();    // human id -> { x, y, t } of their last keystroke
   const charges = [];          // { x, y, v, t, cool } pressure building where a crowd types
   const blasts = [];           // shock waves going out
@@ -547,8 +541,6 @@ const FIREBASE_CONFIG = {
       if (!v || isHuman(v)) continue;
       deathSound(key);
       cellDel(key);
-      // during a test nothing leaves this browser
-      if (testing) continue;
       clearings.push({ x: key % COLS, y: (key / COLS) | 0, t: now });
       if (clearings.length > 400) clearings.splice(0, clearings.length - 400);
       gone[`cells/${key % COLS}_${(key / COLS) | 0}`] = null; n++;
@@ -1565,7 +1557,7 @@ const FIREBASE_CONFIG = {
     let best = null, bd = Infinity;
     for (let dy = -AREA_Y; dy <= AREA_Y; dy++) for (let dx = -AREA_X; dx <= AREA_X; dx++) {
       const v = cells.get(keyOf(cx + dx, cy + dy));
-      if (!isHuman(v) || v.c === ' ' || v.o.startsWith('test-')) continue;
+      if (!isHuman(v) || v.c === ' ') continue;
       const d = (dx / (AREA_X + 1)) ** 2 + (dy / (AREA_Y + 1)) ** 2;
       if (d < bd) { bd = d; best = { x: mod(cx + dx, COLS), y: mod(cy + dy, ROWS), o: v.o }; }
     }
@@ -1813,60 +1805,6 @@ const FIREBASE_CONFIG = {
   document.fonts.ready.then(() => { dirty = true; });
   requestAnimationFrame(frame);
   connect();
-
-  // ---- Test: three fake humans arrive one after the other next to the middle of the screen and
-  //      type together, so the widening decay and the shock wave can be seen alone. Nothing they
-  //      write, and nothing that dies, is sent to the database; leaving the test clears their text.
-  let testEnd = 0;
-  const ghosts = [];
-  const GHOST_TEXT = ['i am not a bot, i promise', 'we were here before the noise', 'nobody reads this but you', 'typing slowly, thinking',
-    'is anyone else awake?', 'my hands are cold tonight', 'the sea keeps eating the words', 'hello? hello?', 'i forgot what i wanted to say',
-    'this line is mine', 'robots do not get tired', 'we could build a town here'];
-  const testBtn = $('testBtn');
-  async function ghostLoop(i, cx, cy) {
-    const g = { id: 'test-' + randId(), k: randColor(), keys: new Set() };
-    ghosts.push(g);
-    await sleep(i * 3500);
-    const sx = cx + [-16, 10, -6][i], sy = cy + [-3, 2, 7][i];
-    let x = sx, y = sy;
-    while (testing && performance.now() < testEnd) {
-      // back on a line already written: clear it first
-      for (let k = 0; k < 40; k++) { const key = keyOf(sx + k, y), v = cells.get(key); if (v && v.o === g.id) cellDel(key); }
-      for (const ch of pick(GHOST_TEXT)) {
-        if (!testing) return;
-        const key = keyOf(x, y), v = cells.get(key);
-        if (ch !== ' ' && !(isHuman(v) && v.o !== g.id)) {
-          cellSet(key, { c: ch, k: g.k, o: g.id }); g.keys.add(key);
-          keySound(key, g.id, false); disturb(mod(x, COLS), mod(y, ROWS), g.id);
-        }
-        x++; cursors.set(g.id, { x: mod(x, COLS), y: mod(y, ROWS), k: g.k }); dirty = true;
-        await sleep(ch === ' ' ? rand(120, 300) : rand(70, 170));
-      }
-      x = sx; y++;
-      if (y > sy + 4) y = sy;
-      await sleep(rand(300, 800));
-    }
-    if (testing && performance.now() >= testEnd) stopTest();
-  }
-  function startTest() {
-    if (testing) return;
-    testing = true; testEnd = performance.now() + 32000;
-    testBtn.textContent = 'stop test'; testBtn.classList.add('on');
-    const cx = Math.floor((cam.x + vw / cam.z / 2) / CW), cy = Math.floor((cam.y + vh / cam.z / 2) / CH);
-    for (let i = 0; i < 3; i++) ghostLoop(i, cx, cy);
-  }
-  function stopTest() {
-    if (!testing) return;
-    testing = false;
-    for (const g of ghosts) {
-      for (const key of g.keys) { const v = cells.get(key); if (v && v.o === g.id) cellDel(key); }
-      cursors.delete(g.id); typing.delete(g.id);
-    }
-    ghosts.length = 0; charges.length = 0;
-    testBtn.textContent = 'test'; testBtn.classList.remove('on');
-    dirty = true;
-  }
-  testBtn.addEventListener('click', () => { initAudio(); soundOn = true; testing ? stopTest() : startTest(); testBtn.blur(); });
 
   // ---- "you" appears after a few seconds of doing nothing, and goes away at the next gesture
   const hud = $('hud');
