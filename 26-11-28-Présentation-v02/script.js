@@ -106,14 +106,6 @@ const SLIDES = [
 		{ t: 'Does scarcity make people write less, or better?', c: 'a', tag: 'FCut' },
 	],
 	[
-		{ t: '3 · questions for you', c: 'kick' },
-		{ t: 'We\'d like to know', c: 'q' },
-		{ t: 'When you see a cursor, do you assume it\'s a person?', c: 'a' },
-		{ t: 'Would you drain an old voice to keep writing?', c: 'a' },
-		{ t: 'When the map finishes your sentence: relief, or defeat?', c: 'a' },
-		{ t: 'Should a map like this ever end?', c: 'a' },
-	],
-	[
 		{ t: 'Try it:', c: 'small' },
 		{ t: URL_CG, c: 'url' },
 	],
