@@ -1,0 +1,184 @@
+:root {
+	--ocean: #0000ff;
+	--pink: #f6cef6;
+	--backing: rgba(0, 0, 0, .86);
+	--human: #f6cef6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	height: 100%;
+	overflow: hidden;
+	background: var(--ocean);
+	color: #fff;
+	font-family: "VT323", ui-monospace, Menlo, monospace;
+	cursor: none;
+}
+
+/* ---- presentation text (human) */
+#main {
+	position: fixed;
+	left: 7vw;
+	right: 7vw;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 4;
+}
+
+.line {
+	display: block;
+	margin: 0 0 .25em;
+	white-space: pre-wrap;
+}
+
+.line .done {
+	background: var(--backing);
+	color: var(--human);
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+}
+
+.line .rest { visibility: hidden; }
+
+.q {
+	font-size: clamp(44px, 7.2vw, 140px);
+	line-height: .95;
+	margin-bottom: .45em;
+}
+
+.a {
+	font-size: clamp(28px, 3.8vw, 72px);
+	line-height: 1.05;
+}
+
+.title {
+	font-size: clamp(64px, 13vw, 260px);
+	line-height: .9;
+	margin-bottom: .2em;
+}
+
+.sub {
+	font-size: clamp(24px, 3vw, 56px);
+}
+
+.url {
+	font-size: clamp(28px, 4.4vw, 90px);
+	line-height: 1.05;
+	word-break: break-all;
+}
+
+.small {
+	font-size: clamp(22px, 2.4vw, 44px);
+	margin-bottom: .6em;
+}
+
+/* the human cursor: a block in the writer's colour */
+.cursor {
+	display: inline-block;
+	width: .5em;
+	height: .9em;
+	vertical-align: -.1em;
+	background: var(--human);
+}
+.cursor.blink { animation: blink 1.06s steps(1) infinite; }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---- bots */
+#bots {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+}
+
+.bot {
+	position: absolute;
+	font-size: clamp(16px, 1.45vw, 28px);
+	line-height: 1;
+	white-space: pre;
+	transition: opacity 1.2s;
+}
+
+.bot .bl {
+	display: block;
+	width: max-content;
+	background: var(--backing);
+}
+
+.bot .g { opacity: .7; }
+
+.bot .cursor { width: .55em; height: .95em; }
+
+.bot.dead { opacity: 0; }
+
+/* ---- land, under everything */
+#land {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+	transition: filter 1.5s;
+}
+
+/* ---- other people: their cursors, the line between them, their text */
+#fx {
+	position: fixed;
+	inset: 0;
+	z-index: 2;
+	pointer-events: none;
+}
+#people {
+	position: fixed;
+	inset: 0;
+	z-index: 3;
+	pointer-events: none;
+}
+.person {
+	position: absolute;
+	border: 3px solid;
+}
+.ptext {
+	position: absolute;
+	font-size: clamp(16px, 1.45vw, 28px);
+	line-height: 1;
+	white-space: pre;
+	background: var(--backing);
+}
+
+/* ---- nobody online: the world freezes */
+#bots { transition: filter 1.5s; }
+body.frozen #bots, body.frozen #land { filter: grayscale(.85) brightness(.8); }
+body.frozen #bots .cursor { animation-play-state: paused; }
+
+/* ---- shock wave */
+.wave {
+	position: fixed;
+	border-radius: 50%;
+	border: 6px solid #fff;
+	box-shadow: 0 0 0 6px var(--pink), inset 0 0 0 6px var(--pink);
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+	z-index: 5;
+}
+
+/* ---- corners */
+#count, #hint {
+	position: fixed;
+	z-index: 4;
+	bottom: 14px;
+	font-size: 20px;
+	letter-spacing: .06em;
+}
+#count { right: 18px; }
+#hint {
+	left: 18px;
+	opacity: .8;
+	transition: opacity 1s;
+}
+#hint.gone { opacity: 0; }
