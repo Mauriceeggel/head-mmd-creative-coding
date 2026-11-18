@@ -1,0 +1,258 @@
+:root {
+	--ocean: #0000ff;
+	--pink: #f6cef6;
+	--backing: rgba(0, 0, 0, .86);
+	--human: #f6cef6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	height: 100%;
+	overflow: hidden;
+	background: var(--ocean);
+	color: #fff;
+	font-family: "Silkscreen", ui-monospace, Menlo, monospace;
+	cursor: none;
+}
+
+/* ---- presentation text (human) */
+#main {
+	position: fixed;
+	left: 7vw;
+	right: 7vw;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 4;
+	--fit: 1;
+}
+/* a screenshot on this slide: the text keeps the left side */
+body.has-shot #main { right: 46vw; }
+
+.line {
+	display: block;
+	margin: 0 0 .25em;
+	white-space: pre-wrap;
+}
+
+.line .done {
+	background: #000;
+	padding: .06em .3em;
+	margin: 0 -.3em;
+	box-shadow: 0 0 0 3px #000;
+}
+/* nothing typed yet on this line: no black box either */
+.line .done:empty {
+	padding: 0;
+	margin: 0;
+	box-shadow: none;
+	color: var(--human);
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+}
+
+.line .rest { visibility: hidden; }
+
+.q, .title { text-transform: uppercase; }
+.q {
+	font-size: calc(clamp(32px, 4.6vw, 92px) * var(--fit));
+	line-height: 1.25;
+	margin-bottom: .4em;
+}
+
+.a {
+	font-size: calc(clamp(17px, 2vw, 40px) * var(--fit));
+	line-height: 1.35;
+}
+.line.a { margin-bottom: .45em; }
+
+.title {
+	font-size: calc(clamp(40px, 7.4vw, 150px) * var(--fit));
+	line-height: 1.2;
+	margin-bottom: .25em;
+}
+
+.sub {
+	font-size: calc(clamp(18px, 2.2vw, 44px) * var(--fit));
+	margin-bottom: .5em;
+}
+
+.url {
+	font-size: calc(clamp(18px, 2.4vw, 48px) * var(--fit));
+	line-height: 1.2;
+	word-break: break-all;
+}
+
+.small {
+	font-size: calc(clamp(15px, 1.6vw, 32px) * var(--fit));
+	margin-bottom: .6em;
+}
+
+/* the small label above a title */
+.kick {
+	font-size: calc(clamp(13px, 1.1vw, 22px) * var(--fit));
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	margin-bottom: 1em;
+}
+.kick .done { color: #fff; }
+
+/* "FCut" before a line that only the iteration has */
+.tag {
+	display: inline-block;
+	visibility: hidden;
+	margin-right: .6em;
+	padding: .05em .4em;
+	font-size: .6em;
+	vertical-align: .2em;
+	background: #ffd166;
+	color: #000;
+	font-weight: 700;
+	letter-spacing: .05em;
+}
+
+/* the badge appears with its line, not before */
+.line.on .tag { visibility: visible; }
+
+/* ---- screenshot beside the text */
+#shot {
+	position: fixed;
+	right: 5vw;
+	top: 50%;
+	width: 38vw;
+	transform: translateY(-50%);
+	z-index: 4;
+	margin: 0;
+	border: 3px solid #fff;
+	background: #000;
+	box-shadow: 10px 10px 0 #000;
+	opacity: 0;
+	visibility: hidden;
+}
+#shot img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+#shot.on { opacity: 1; visibility: visible; }
+/* appears like a screen redrawing, top to bottom, in steps */
+#shot.wipe { animation: wipe .7s steps(10) both; }
+@keyframes wipe { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+@media (max-aspect-ratio: 4/3) {
+	body.has-shot #main { right: 7vw; top: 34%; }
+	#shot { top: auto; bottom: 7vh; transform: none; width: 50vw; }
+}
+
+/* the human cursor: a block in the writer's colour */
+.cursor {
+	display: inline-block;
+	width: .5em;
+	height: .9em;
+	vertical-align: -.1em;
+	background: var(--human);
+}
+.cursor.blink { animation: blink 1.06s steps(1) infinite; }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---- bots */
+#bots {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	opacity: .62;
+}
+
+.bot {
+	position: absolute;
+	font-size: clamp(11px, .85vw, 17px);
+	line-height: 1.15;
+	white-space: pre;
+	transition: opacity 1.2s;
+}
+
+.bot .bl {
+	display: block;
+	width: max-content;
+	background: var(--backing);
+}
+
+.bot .g { opacity: .7; }
+
+.bot .cursor { width: .55em; height: .95em; }
+
+.bot.dead { opacity: 0; }
+
+/* FCut: dead machine text sleeps under the map, pale and without its backing… */
+.bot.sleep { color: #c9d2ff; opacity: .55; transition: opacity .6s; }
+.bot.sleep .bl { background: none; }
+.bot.sleep .cursor { display: none; }
+/* …and every letter read from it drips away as pink ink */
+.bot .drip { color: var(--pink); text-shadow: 0 0 6px var(--pink); opacity: 1; }
+
+/* ---- land, under everything */
+#land {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+	transition: filter 1.5s;
+}
+
+/* ---- other people: their cursors, the line between them, their text */
+#fx {
+	position: fixed;
+	inset: 0;
+	z-index: 2;
+	pointer-events: none;
+}
+#people {
+	position: fixed;
+	inset: 0;
+	z-index: 3;
+	pointer-events: none;
+}
+.person {
+	position: absolute;
+	border: 3px solid;
+}
+.ptext {
+	position: absolute;
+	font-size: clamp(11px, .85vw, 17px);
+	line-height: 1.15;
+	white-space: pre;
+	background: var(--backing);
+}
+
+/* ---- nobody online: the world freezes */
+#bots { transition: filter 1.5s; }
+body.frozen #bots, body.frozen #land { filter: grayscale(.85) brightness(.8); }
+body.frozen #bots .cursor { animation-play-state: paused; }
+
+/* ---- shock wave */
+.wave {
+	position: fixed;
+	border-radius: 50%;
+	border: 6px solid #fff;
+	box-shadow: 0 0 0 6px var(--pink), inset 0 0 0 6px var(--pink);
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+	z-index: 5;
+}
+
+/* ---- corners */
+#count, #hint {
+	position: fixed;
+	z-index: 4;
+	bottom: 14px;
+	font-size: 15px;
+	letter-spacing: .06em;
+}
+#count { right: 18px; }
+#hint {
+	left: 18px;
+	opacity: .8;
+	transition: opacity 1s;
+}
+#hint.gone { opacity: 0; }
